@@ -1,6 +1,7 @@
 ---
 description: Show Jev router stats and the state of each optional feature
 allowed-tools: Bash(node:*)
+disable-model-invocation: true
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/jev-cli.js" status $ARGUMENTS`

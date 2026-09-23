@@ -2,6 +2,7 @@
 description: Opt-in daily update check for plugins, Codex CLI and RTK; apply updates
 argument-hint: [--check | on | off]
 allowed-tools: Bash(node:*)
+disable-model-invocation: true
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/jev-cli.js" update $ARGUMENTS`

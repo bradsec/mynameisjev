@@ -1,6 +1,7 @@
 ---
 description: Turn the Jev router off
 allowed-tools: Bash(node:*)
+disable-model-invocation: true
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/jev-cli.js" off $ARGUMENTS`

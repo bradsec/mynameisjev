@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2
+
+Security fixes:
+
+- The update check validates git remotes and refs taken from third-party
+  marketplace files before passing them to `git ls-remote`, so a value like
+  `--upload-pack=...` can't run a command.
+- On Windows, only `.cmd`/`.bat` shims run through the shell, and only with
+  arguments free of shell metacharacters; real executables run directly.
+- The `/mynameisjev:*` commands can only be run by you, not invoked by
+  Claude, since they pass their arguments to a shell.
+
 ## 0.1.1
 
 - Status line shows the router state and whether OpenRouter access works

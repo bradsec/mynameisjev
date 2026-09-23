@@ -71,6 +71,12 @@ function newer(a, b) {
   return false;
 }
 
+// A git remote and ref safe to hand to `git ls-remote`: an https or ssh
+// remote and a plain ref name, neither able to pass as a git option.
+function safeRemote(url, ref) {
+  return /^(https:\/\/|ssh:\/\/|git@)[A-Za-z0-9._~:\/@-]+$/.test(url) && /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(ref);
+}
+
 const short = (sha) => String(sha).slice(0, 12);
 const sameSha = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
 
@@ -96,7 +102,12 @@ async function latestPluginVersion(marketplace, name, install) {
     if (!install.gitCommitSha) return entry.version ? { latest: entry.version, compare: 'version' } : null;
     if (src.sha) return { latest: short(src.sha), compare: 'sha' };
     const url = src.url || `https://github.com/${src.repo}.git`;
-    const head = (await run('git', ['ls-remote', url, src.ref || 'HEAD'])).split(/\s/)[0];
+    const ref = src.ref || 'HEAD';
+    // Both come from a third-party marketplace file and reach git as
+    // arguments: a value starting with "-" would be read as an option
+    // (--upload-pack runs a command), so only accept plain remotes and refs.
+    if (!safeRemote(url, ref)) throw new Error(`skipped: unexpected source ${JSON.stringify(url)} ${JSON.stringify(ref)}`);
+    const head = (await run('git', ['ls-remote', url, ref])).split(/\s/)[0];
     return head ? { latest: short(head), compare: 'sha' } : null;
   }
   return null;
@@ -252,7 +263,7 @@ async function applyUpdates() {
   return lines;
 }
 
-module.exports = { runCheck, readCache, refreshInBackgroundIfStale, applyUpdates, describe };
+module.exports = { runCheck, readCache, refreshInBackgroundIfStale, applyUpdates, describe, safeRemote };
 
 if (require.main === module && process.argv[2] === 'check') {
   runCheck()
