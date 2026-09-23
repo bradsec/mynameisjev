@@ -1,0 +1,15 @@
+{
+  "name": "mynameisjev",
+  "description": "The mynameisjev plugin: a Jev-powered model router for Claude Code, with optional Codex routing.",
+  "owner": {
+    "name": "BRADSEC",
+    "url": "https://github.com/bradsec"
+  },
+  "plugins": [
+    {
+      "name": "mynameisjev",
+      "source": "./plugin",
+      "description": "Jev model router for Claude Code: sizes each message with TypeSafe's Jev model and routes work to the cheapest fitting Claude model or, when available, Codex. Optional Claude/Codex usage status line and limit-aware hand-off."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "mynameisjev",
+  "version": "0.1.0",
+  "description": "Jev model router for Claude Code: sizes each message with TypeSafe's Jev model and routes work to the cheapest fitting Claude model or, when available, Codex.",
+  "author": {
+    "name": "BRADSEC",
+    "url": "https://github.com/bradsec"
+  },
+  "homepage": "https://github.com/bradsec/mynameisjev",
+  "repository": "https://github.com/bradsec/mynameisjev",
+  "license": "MIT",
+  "keywords": ["router", "cost", "tokens", "codex", "openrouter", "statusline"]
+}
