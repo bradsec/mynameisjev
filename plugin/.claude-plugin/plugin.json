@@ -1,6 +1,6 @@
 {
   "name": "mynameisjev",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Jev model router for Claude Code: sizes each message with TypeSafe's Jev model and routes work to the cheapest fitting Claude model or, when available, Codex.",
   "author": {
     "name": "BRADSEC",

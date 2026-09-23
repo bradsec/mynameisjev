@@ -120,9 +120,23 @@ function jevSegment() {
   if (!state.enabled) return `${label} ${mutedGray('off')}`;
   if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
   const last = state.lastCall;
-  if (!last) return `${label} ${amber('on')}`;
-  if (!last.ok) return `${label} ${red(String(last.error || 'error').slice(0, 24))}`;
-  return `${label} ${green('✓')}`;
+  const route = routeSuffix(state.route);
+  if (!last) return `${label} ${amber('on')}${route}`;
+  if (!last.ok) return `${label} ${red(String(last.error || 'error').slice(0, 24))}${route}`;
+  return `${label} ${green('✓')}${route}`;
+}
+
+// Where Jev sent the latest message: " → opus" (grey, the session's own
+// model), " → codex gpt-6-sol?" (amber, suggested) or " → sonnet ✓" (green,
+// the hand-off ran). Hidden once older than 30 minutes.
+function routeSuffix(route) {
+  if (!route || Date.now() - Date.parse(route.at) > 30 * 60 * 1000) return '';
+  const where = route.target === 'codex'
+    ? `codex${route.model && route.model !== 'default' ? ` ${route.model}` : ''}`
+    : route.model;
+  if (route.how === 'ran') return ` ${green(`→ ${where} ✓`)}`;
+  if (route.how === 'suggested') return ` ${amber(`→ ${where}?`)}`;
+  return ` ${mutedGray(`→ ${where}`)}`;
 }
 
 // ── Codex usage (third line) ──────────────────────────────────────────────────

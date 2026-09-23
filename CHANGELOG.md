@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- The status line shows where the latest message went, after the JEV state:
+  `→ opus` (the session's own model), `→ sonnet?` or `→ codex gpt-6-sol?`
+  (suggested), and `→ sonnet ✓` or `→ codex gpt-6-sol ✓` once the hand-off
+  actually ran. The usage watch hook detects Codex companion tasks and
+  `mynameisjev:*` subagents as they run.
+
 ## 0.2.0
 
 Claude usage limits are handled well before 100%:

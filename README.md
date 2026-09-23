@@ -120,6 +120,15 @@ Line 1 shows the router's state next to the model:
 The check reuses the outcome of the router's last call, so the status line
 never calls the API itself.
 
+After it, an arrow shows where the latest message went (hidden after 30
+minutes):
+
+| Shows | Meaning |
+| --- | --- |
+| `→ opus` (grey) | Handled on the session's own Claude model |
+| `→ sonnet?`, `→ codex gpt-6-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
+| `→ sonnet ✓`, `→ codex gpt-6-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
+
 ### 5. Codex (optional)
 
 Skip this if you don't use Codex; nothing Codex-related runs without it.

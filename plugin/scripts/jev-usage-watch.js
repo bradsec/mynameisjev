@@ -6,6 +6,9 @@
 // notices), tells Claude to move remaining work to Codex or wrap up, tells
 // the user, and at the auto-transfer level copies the session into Codex.
 //
+// It also records hand-offs that actually ran (a Codex companion task, or a
+// mynameisjev:* subagent) as state.route, for the status line.
+//
 // Runs after every tool call, so the common case (router off, or usage
 // below the first threshold) reads two small files and exits before loading
 // the router.
@@ -30,8 +33,32 @@ function peakPct() {
   }
 }
 
+// Helper agents and the Claude model each is pinned to (plugin/agents/*.md).
+const HELPER_MODELS = { 'mynameisjev:tiny': 'haiku', 'mynameisjev:everyday': 'sonnet', 'mynameisjev:large': 'opus' };
+
+// The hand-off this tool call performed, or null: { target, model }.
+function handOff(hookInput) {
+  const input = hookInput.tool_input || {};
+  const command = typeof input.command === 'string' ? input.command : '';
+  if ((hookInput.tool_name === 'Bash' || hookInput.tool_name === 'PowerShell') && /codex-companion\.mjs"?\s+task\b/.test(command)) {
+    const model = command.match(/--model\s+"?([\w.-]+)/);
+    return { target: 'codex', model: model ? model[1] : 'default' };
+  }
+  if (hookInput.tool_name === 'Agent' && HELPER_MODELS[input.subagent_type]) {
+    return { target: 'claude', model: HELPER_MODELS[input.subagent_type] };
+  }
+  return null;
+}
+
 async function watch(hookInput) {
-  if (!st.readState().enabled || peakPct() < FAST_PATH_PCT) return null;
+  const current = st.readState();
+  if (!current.enabled) return null;
+  const ran = handOff(hookInput);
+  if (ran) {
+    current.route = { at: new Date().toISOString(), ...ran, how: 'ran' };
+    try { st.writeState(current); } catch (e) { /* the status line just misses one update */ }
+  }
+  if (peakPct() < FAST_PATH_PCT) return null;
 
   const r = require('./jev-router');
   const codex = require('./jev-codex');
@@ -55,7 +82,7 @@ async function watch(hookInput) {
   const when = r.fmtReset(claude.resetsAt, claude.window === '7d');
   const head = `Jev: Claude ${claude.window} usage reached ${pct}% during this turn (resets ${when}).`;
   const codexHead = codexNow.available ? `${head} ${codexNow.text}.` : head;
-  const handOff = codexNow.ok && companion;
+  const canHandOff = codexNow.ok && companion;
 
   let notice;
   let context;
@@ -69,10 +96,10 @@ async function watch(hookInput) {
       : state.autoTransfer ? ` Jev copies this session into Codex at ${TH.auto}%.`
         : ' Run /codex:transfer to continue this session in Codex.');
     context = `${head} Near the limit: finish the current step, then stop and give a short summary of what is left.` +
-      (handOff ? ` Hand any remaining self-contained step to Codex: ${r.subStepAdvice(claude, companion)}` : '');
+      (canHandOff ? ` Hand any remaining self-contained step to Codex: ${r.subStepAdvice(claude, companion)}` : '');
   } else {
-    notice = `${codexHead}${handOff ? ' Claude now hands self-contained steps to Codex.' : ''}`;
-    context = handOff ? r.subStepAdvice(claude, companion) : `${head} Keep the rest of this turn short.`;
+    notice = `${codexHead}${canHandOff ? ' Claude now hands self-contained steps to Codex.' : ''}`;
+    context = canHandOff ? r.subStepAdvice(claude, companion) : `${head} Keep the rest of this turn short.`;
   }
   return {
     systemMessage: notice,
@@ -80,7 +107,7 @@ async function watch(hookInput) {
   };
 }
 
-module.exports = { watch, FAST_PATH_PCT };
+module.exports = { watch, handOff, FAST_PATH_PCT };
 
 if (require.main === module) {
   let input = '';

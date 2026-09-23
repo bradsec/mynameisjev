@@ -23,6 +23,19 @@ const setUsage = (pct) => fs.writeFileSync(path.join(dataDir, 'claude-limits.jso
   JSON.stringify({ at: Date.now(), five_hour: { used_percentage: pct, resets_at: Math.floor(Date.now() / 1000) + 3600 } }));
 const hookInput = { session_id: 's', cwd: home, transcript_path: path.join(claudeDir, 'projects', 'p', 's.jsonl') };
 
+test('records hand-offs that ran, even below the usage thresholds', async () => {
+  setState({});
+  setUsage(10);
+  await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task --model gpt-6-sol --effort medium "x"' } });
+  let route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
+  assert.deepStrictEqual({ target: route.target, model: route.model, how: route.how }, { target: 'codex', model: 'gpt-6-sol', how: 'ran' });
+  await watcher.watch({ tool_name: 'Agent', tool_input: { subagent_type: 'mynameisjev:tiny', prompt: 'x' } });
+  route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
+  assert.strictEqual(route.model, 'haiku');
+  assert.strictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'Explore' } }), null);
+  assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
+});
+
 test('fast path threshold matches the router', () => {
   assert.strictEqual(watcher.FAST_PATH_PCT, router.THRESHOLDS.route);
 });

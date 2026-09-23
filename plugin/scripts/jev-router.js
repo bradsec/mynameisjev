@@ -224,6 +224,13 @@ function codexStatus(cache) {
   return { ok: true, available: true, text };
 }
 
+// Where the current message is headed, for the status line: the session's
+// own Claude model, or a suggested Claude helper / Codex model.
+// jev-usage-watch.js upgrades a suggestion to how: 'ran' when it runs.
+function setRoute(state, target, model, how) {
+  state.route = { at: new Date().toISOString(), target, model: model || 'claude', how };
+}
+
 // Choose between Codex, a Claude helper, and no note. Codex takes
 // self-contained work when it has headroom and either Claude is running low
 // or the task is coding (Codex bills a separate ChatGPT-plan quota). Returns
@@ -237,7 +244,7 @@ function routeAdvice(tier, result, ctx) {
   // Work that needs this conversation can't move to Codex whole, but its
   // self-contained steps can: with Claude low, that is the note to give.
   if (!contained && ctx.claudeLow && ctx.codexNow.ok && companion) {
-    return { note: subStepAdvice(ctx.claude, companion), codex: true };
+    return { note: subStepAdvice(ctx.claude, companion), codex: true, model: 'steps' };
   }
   if (contained && ctx.codexNow.ok && companion && (ctx.claudeLow || coding)) {
     // Same start-up argument as for Claude helpers: a one-line job is
@@ -247,11 +254,11 @@ function routeAdvice(tier, result, ctx) {
       ? `Claude ${ctx.claude.window} usage at ${Math.round(ctx.claude.pct)}%`
       : 'self-contained coding task; Codex uses a separate quota';
     const choice = codex.tierChoice(tier, ctx.overrides, ctx.codexCache);
-    return { note: codexAdvice(tier, result, reason, choice, companion), codex: true };
+    return { note: codexAdvice(tier, result, reason, choice, companion), codex: true, model: choice.model || 'default' };
   }
 
   const advice = delegationAdvice(tier, result, ctx.sessionFamily);
-  return typeof advice === 'string' ? { note: advice, codex: false } : advice;
+  return typeof advice === 'string' ? { note: advice, codex: false, model: TIER_INFO[tier].model } : advice;
 }
 
 // Note for Claude when its plan usage is high but the message can't go to
@@ -461,7 +468,7 @@ function looksSkippable(prompt) {
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
   routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice,
-  claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState,
+  claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
 
@@ -562,6 +569,11 @@ function main() {
         return;
       }
 
+      // Every message runs on the session model unless a note below says
+      // otherwise.
+      const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
+      setRoute(state, 'claude', sessionFamily, 'session');
+
       if (looksSkippable(prompt)) {
         recordSilent(state, 'skipped', 'short or slash-command message');
         return;
@@ -605,6 +617,8 @@ function main() {
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();
         if (claudeLow && codexNow.ok && companion) {
+          setRoute(state, 'codex', 'steps', 'suggested');
+          writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claude, companion) };
         }
       } else {
@@ -612,7 +626,7 @@ function main() {
         // sized messages that got no note because delegating would not pay off.
         state.stats[tier] += 1;
         const advice = routeAdvice(tier, result, {
-          sessionFamily: sessionModelFamily(sessionId, transcriptPath),
+          sessionFamily,
           claude,
           claudeLow,
           codexNow,
@@ -621,6 +635,7 @@ function main() {
         });
         if (advice.note) {
           if (advice.codex) state.stats.codex += 1;
+          setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested');
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };
         } else {
