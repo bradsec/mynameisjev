@@ -1,5 +1,7 @@
 # mynameisjev
 
+[![CI](https://github.com/bradsec/mynameisjev/actions/workflows/ci.yml/badge.svg)](https://github.com/bradsec/mynameisjev/actions/workflows/ci.yml)
+
 A Claude Code plugin that sizes every message you send and tells Claude when
 a cheaper model, a stronger one, or Codex would handle it better.
 
@@ -88,9 +90,10 @@ In Claude Code:
 
 `/mynameisjev:on` warns if it can't see `OPENROUTER_API_KEY`.
 
-While the repository is private, only accounts with access can add it. Claude
-Code clones it with your existing git credentials (`gh auth login`, the macOS
-Keychain, or Git Credential Manager on Windows).
+This marketplace is third-party, so Claude Code doesn't update the plugin in
+the background. Update with `/plugin update mynameisjev@mynameisjev`, or turn
+the update check on (`/mynameisjev:update on`) to be told when a release is
+out.
 
 ### 4. Status line (optional)
 
@@ -265,6 +268,19 @@ claude plugin validate plugin # plugin manifest
 
 To try local changes: `/plugin marketplace add /path/to/mynameisjev`, then
 install `mynameisjev@mynameisjev`.
+
+CI runs the tests on Linux, macOS and Windows with Node 18 and 22, and
+validates the manifests.
+
+To release:
+
+1. Bump `version` in `plugin/.claude-plugin/plugin.json`. Claude Code only
+   offers an update when this changes.
+2. Add a `## <version>` section at the top of `CHANGELOG.md`.
+3. Commit, then tag and push: `git tag v<version> && git push origin v<version>`.
+
+The release workflow checks the tag matches `plugin.json`, runs the tests, and
+publishes a GitHub release with that version's changelog section as notes.
 
 ## License
 
