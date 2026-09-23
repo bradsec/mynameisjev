@@ -131,3 +131,20 @@ test('transcript: newest main-thread reply wins, subagent and synthetic entries 
   assert.strictEqual(router.transcriptModel(file).family, 'opus');
   assert.strictEqual(router.transcriptModel(path.join(tmp, 'missing.jsonl')), null);
 });
+
+test('prefer codex: self-contained work goes to Codex at low Claude usage', () => {
+  const r = router.routeAdvice('everyday', result(), ctx({ codexNow: codexOk, preferCodex: true }));
+  assert.strictEqual(r.codex, true);
+  assert.match(r.note, /prefer-Codex mode is on/);
+});
+
+test('prefer codex: work that needs the conversation gets the sub-step note', () => {
+  const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true }));
+  assert.strictEqual(r.model, 'steps');
+  assert.match(r.note, /^Jev: prefer-Codex mode is on\. Keep coordination/);
+});
+
+test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () => {
+  assert.match(router.routeAdvice('tiny', result({ size: 'tiny' }), ctx({ codexNow: codexOk, preferCodex: true })).suppress, /hand-off costs more/);
+  assert.strictEqual(router.routeAdvice('everyday', result(), ctx({ codexNow: codexBusy, preferCodex: true })).codex, false);
+});

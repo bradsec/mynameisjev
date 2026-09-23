@@ -20,7 +20,7 @@ const onOff = (b) => (b ? 'on' : 'off');
 
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
-  update: updateCommand, transfer: transferCommand, statusline: statuslineCommand,
+  update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
 };
 
 (async () => {
@@ -87,6 +87,7 @@ async function status() {
 
   console.log(`Codex: ${available ? 'available' : 'not available (needs the codex plugin enabled and the codex CLI on PATH)'}`);
   if (available) {
+    console.log(`Prefer: ${state.prefer} (/mynameisjev:prefer codex | claude)`);
     console.log(`Routed to Codex: ${s.codex}`);
     console.log(`Auto-transfer: ${onOff(state.autoTransfer)}, transfers so far: ${s.transfers}` +
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
@@ -198,6 +199,22 @@ async function cavemanCommand([arg]) {
   console.log(`Claude ${await caveman.installClaude()}`);
   if (state.sync) console.log(`Codex AGENTS.md: ${sync.syncAgents({ withCaveman: true })}`);
   else console.log('Codex: turn on /mynameisjev:sync to add caveman to ~/.codex/AGENTS.md.');
+}
+
+async function preferCommand([arg]) {
+  if (arg === 'codex' || arg === 'claude') {
+    state.prefer = arg;
+    st.writeState(state);
+  } else if (arg) {
+    throw new Error('usage: /mynameisjev:prefer [codex | claude]');
+  }
+  if (state.prefer === 'codex') {
+    console.log('Prefer: codex. Self-contained work goes to Codex at any Claude usage, and Claude hands the self-contained steps of other work to Codex while it coordinates.');
+    console.log('Tiny one-line jobs stay on Claude, and work falls back to Claude while Codex is near its limit.');
+    if (!codex.codexAvailable()) console.log('WARNING: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH), so work stays on Claude until it is.');
+  } else {
+    console.log('Prefer: claude. Work goes to Codex only for self-contained coding tasks, or once Claude usage passes the routing threshold.');
+  }
 }
 
 async function transferCommand([arg]) {

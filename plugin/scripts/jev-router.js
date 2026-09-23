@@ -241,18 +241,22 @@ function routeAdvice(tier, result, ctx) {
   const coding = result.coding !== null && result.coding >= NOUL_THRESHOLD;
 
   const companion = codex.companionPath();
+  // Codex first: Claude's usage is past the routing threshold, or the user
+  // turned prefer-Codex mode on.
+  const codexFirst = ctx.claudeLow || ctx.preferCodex;
   // Work that needs this conversation can't move to Codex whole, but its
-  // self-contained steps can: with Claude low, that is the note to give.
-  if (!contained && ctx.claudeLow && ctx.codexNow.ok && companion) {
-    return { note: subStepAdvice(ctx.claude, companion), codex: true, model: 'steps' };
+  // self-contained steps can: with Codex first, that is the note to give.
+  if (!contained && codexFirst && ctx.codexNow.ok && companion) {
+    return { note: subStepAdvice(ctx.claudeLow ? ctx.claude : null, companion), codex: true, model: 'steps' };
   }
-  if (contained && ctx.codexNow.ok && companion && (ctx.claudeLow || coding)) {
+  if (contained && ctx.codexNow.ok && companion && (codexFirst || coding)) {
     // Same start-up argument as for Claude helpers: a one-line job is
     // cheaper done in place than handed off.
     if (tier === 'tiny' && !heavy) return { suppress: 'tiny: hand-off costs more than it saves' };
     const reason = ctx.claudeLow
       ? `Claude ${ctx.claude.window} usage at ${Math.round(ctx.claude.pct)}%`
-      : 'self-contained coding task; Codex uses a separate quota';
+      : ctx.preferCodex ? 'prefer-Codex mode is on'
+        : 'self-contained coding task; Codex uses a separate quota';
     const choice = codex.tierChoice(tier, ctx.overrides, ctx.codexCache);
     return { note: codexAdvice(tier, result, reason, choice, companion), codex: true, model: choice.model || 'default' };
   }
@@ -263,8 +267,13 @@ function routeAdvice(tier, result, ctx) {
 
 // Note for Claude when its plan usage is high but the message can't go to
 // Codex whole: keep coordinating here, send the self-contained steps there.
+// `claude` is the usage peak when that is the reason, or null in prefer-Codex
+// mode.
 function subStepAdvice(claude, companion) {
-  return `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). ` +
+  const why = claude
+    ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). `
+    : 'Jev: prefer-Codex mode is on. ';
+  return why +
     'Keep coordination and decisions here, but hand each self-contained step (tests, file edits, searches, reviews, research) to Codex ' +
     `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the step, with the context it needs>" (add --write if it should edit files). ` +
     'Keep your own replies short.';
@@ -616,10 +625,10 @@ function main() {
         // Unsized work still runs on Claude; with Claude low, point its
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();
-        if (claudeLow && codexNow.ok && companion) {
+        if ((claudeLow || state.prefer === 'codex') && codexNow.ok && companion) {
           setRoute(state, 'codex', 'steps', 'suggested');
           writeState(state);
-          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claude, companion) };
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claudeLow ? claude : null, companion) };
         }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
@@ -629,6 +638,7 @@ function main() {
           sessionFamily,
           claude,
           claudeLow,
+          preferCodex: state.prefer === 'codex',
           codexNow,
           codexCache,
           overrides: state.codexTiers,

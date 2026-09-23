@@ -40,6 +40,8 @@ const DEFAULT_STATE = {
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
   codexTiers: {},
+  // 'codex' routes work to Codex first at any Claude usage (`/mynameisjev:prefer`).
+  prefer: 'claude',
   // Copy the session into Codex from 90% Claude usage (`/mynameisjev:transfer on`).
   autoTransfer: false,
   lastTransfer: null,

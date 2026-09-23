@@ -54,3 +54,8 @@ test('route: hidden after 30 minutes', () => {
   const old = new Date(Date.now() - 31 * 60 * 1000).toISOString();
   assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true }, route: { at: old, target: 'claude', model: 'opus', how: 'session' } }, 'k'), /→/);
 });
+
+test('prefer codex mode is marked', () => {
+  assert.match(line1({ enabled: true, lastCall: { ok: true }, prefer: 'codex' }, 'k'), /JEV ✓ codex-first/);
+  assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true } }, 'k'), /codex-first/);
+});

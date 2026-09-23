@@ -120,7 +120,8 @@ function jevSegment() {
   if (!state.enabled) return `${label} ${mutedGray('off')}`;
   if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
   const last = state.lastCall;
-  const route = routeSuffix(state.route);
+  // Prefer-Codex mode is a standing choice, so it stays visible.
+  const route = (state.prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(state.route);
   if (!last) return `${label} ${amber('on')}${route}`;
   if (!last.ok) return `${label} ${red(String(last.error || 'error').slice(0, 24))}${route}`;
   return `${label} ${green('✓')}${route}`;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- New `/mynameisjev:prefer codex`: routes work to Codex first at any Claude
+  usage (whole self-contained tasks, and the self-contained steps of work
+  that needs the conversation). Tiny jobs stay on Claude and a busy Codex
+  falls back to Claude. `/mynameisjev:prefer claude` restores the default.
+  The status line shows `codex-first` while it's on.
+
 ## 0.3.1
 
 - Default Codex models now use the GPT-6 line: `gpt-6-luna` for tiny tasks

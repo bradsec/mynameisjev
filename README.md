@@ -128,6 +128,7 @@ minutes):
 | `→ opus` (grey) | Handled on the session's own Claude model |
 | `→ sonnet?`, `→ codex gpt-6-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
 | `→ sonnet ✓`, `→ codex gpt-6-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
+| `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on |
 
 ### 5. Codex (optional)
 
@@ -158,6 +159,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:status` | Stats, and the state of each feature |
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
+| `/mynameisjev:prefer` | `codex` routes work to Codex first at any Claude usage; `claude` (default) goes back |
 | `/mynameisjev:statusline` | `install` or `uninstall` the status line |
 | `/mynameisjev:sync` | Opt-in, see below |
 | `/mynameisjev:caveman` | Opt-in, see below |
@@ -192,6 +194,20 @@ Default Codex models per size (change with `/mynameisjev:codex set`):
 | hardest | `gpt-6-astra` | high |
 
 Models missing from your Codex account's list fall back to Codex's default.
+
+### Prefer Codex
+
+`/mynameisjev:prefer codex` makes Codex the first choice at any Claude usage,
+the same routing that normally starts at 80%: self-contained work goes to
+Codex whole, and for work that needs the conversation Claude keeps the
+coordination and hands the self-contained steps to Codex. Tiny one-line jobs
+stay on Claude (a hand-off costs more), and work falls back to Claude while
+Codex is near its limit. The status line shows `codex-first` while it's on;
+`/mynameisjev:prefer claude` switches back.
+
+Claude Code's own conversation always runs on a Claude model. To leave Claude
+out entirely, continue in the Codex CLI (`/codex:transfer`, then
+`codex resume <id>`).
 
 Claude plan usage thresholds, each announced once per usage window:
 
