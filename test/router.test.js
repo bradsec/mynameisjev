@@ -65,7 +65,7 @@ test('route: with Codex, self-contained coding goes to Codex', () => {
   const r = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk }));
   assert.strictEqual(r.codex, true);
   assert.match(r.note, /Route it to Codex/);
-  assert.match(r.note, /codex-companion\.mjs" task --model gpt-5\.6-terra --effort medium/);
+  assert.match(r.note, /codex-companion\.mjs" task --model gpt-6-sol --effort medium/);
 });
 
 test('route: busy Codex falls back to Claude', () => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Default Codex models now use the GPT-6 line: `gpt-6-luna` for tiny tasks
+  (was `gpt-5.6-luna`) and `gpt-6-sol` for everyday tasks (was
+  `gpt-5.6-terra`). Large and hardest stay on `gpt-6-astra`. Custom models set
+  with `/mynameisjev:codex set` are unchanged.
+
 ## 0.3.0
 
 - The status line shows where the latest message went, after the JEV state:

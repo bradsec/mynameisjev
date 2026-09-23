@@ -30,10 +30,10 @@ test('Codex is unavailable without the codex plugin', () => {
 });
 
 test('tier choice: defaults, overrides, unknown models dropped', () => {
-  const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-5.6-luna' }] };
-  assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-5.6-luna', effort: 'low' });
+  const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6-luna' }] };
+  assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-6-luna', effort: 'low' });
   assert.deepStrictEqual(codex.tierChoice('large', { large: { effort: 'high' } }, cache), { model: 'gpt-6-astra', effort: 'high' });
-  assert.strictEqual(codex.tierChoice('everyday', {}, cache).model, null, 'terra is not in this list');
+  assert.strictEqual(codex.tierChoice('everyday', {}, cache).model, null, 'gpt-6-sol is not in this list');
   assert.strictEqual(codex.tierChoice('tiny', { tiny: { effort: 'max' } }, cache).effort, null, 'task effort must be none..xhigh');
 });
 

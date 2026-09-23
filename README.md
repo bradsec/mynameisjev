@@ -186,8 +186,8 @@ Default Codex models per size (change with `/mynameisjev:codex set`):
 
 | Size | Codex model | Effort |
 | --- | --- | --- |
-| tiny | `gpt-5.6-luna` | low |
-| everyday | `gpt-5.6-terra` | medium |
+| tiny | `gpt-6-luna` | low |
+| everyday | `gpt-6-sol` | medium |
 | large | `gpt-6-astra` | medium |
 | hardest | `gpt-6-astra` | high |
 

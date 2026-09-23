@@ -29,8 +29,8 @@ const LOCK_MAX_AGE_MS = 30 * 1000;
 // work, frontier model for large and hardest. Efforts stay within what the
 // companion's `task --effort` accepts (none..xhigh).
 const DEFAULT_TIERS = {
-  tiny: { model: 'gpt-5.6-luna', effort: 'low' },
-  everyday: { model: 'gpt-5.6-terra', effort: 'medium' },
+  tiny: { model: 'gpt-6-luna', effort: 'low' },
+  everyday: { model: 'gpt-6-sol', effort: 'medium' },
   large: { model: 'gpt-6-astra', effort: 'medium' },
   hardest: { model: 'gpt-6-astra', effort: 'high' },
 };
