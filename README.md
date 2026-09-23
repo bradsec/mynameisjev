@@ -101,7 +101,8 @@ Plugins can't set Claude Code's main status line, so this is a separate step:
 ```
 
 It saves your current status line and `/mynameisjev:statusline uninstall`
-puts it back.
+puts it back. The status line also records your Claude plan usage, which the
+router needs for its limit-aware features; without it those stay quiet.
 
 Line 1 shows the router's state next to the model:
 
@@ -114,8 +115,7 @@ Line 1 shows the router's state next to the model:
 | `JEV off` | Router off |
 
 The check reuses the outcome of the router's last call, so the status line
-never calls the API itself. The status line also records your Claude plan usage, which the
-router needs for its limit-aware features; without it those stay quiet.
+never calls the API itself.
 
 ### 5. Codex (optional)
 
