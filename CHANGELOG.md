@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Status line shows the router state and whether OpenRouter access works
+  (`JEV ✓`, `JEV no key`, `JEV HTTP 401`, `JEV off`), based on the router's
+  last Jev call.
+
 ## 0.1.0
 
 First release as a Claude Code plugin.

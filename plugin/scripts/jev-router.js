@@ -540,11 +540,14 @@ function main() {
       try {
         result = await classify(prompt, previous, apiKey);
       } catch (e) {
-        const reason = e.name === 'AbortError' ? `timeout after ${TIMEOUT_MS}ms` : `request failed: ${e.message}`;
-        recordSilent(state, 'failed', reason);
+        const timedOut = e.name === 'AbortError';
+        // Short form for the status line's JEV segment.
+        state.lastCall = { at: new Date().toISOString(), ok: false, error: timedOut ? 'timeout' : e.message };
+        recordSilent(state, 'failed', timedOut ? `timeout after ${TIMEOUT_MS}ms` : `request failed: ${e.message}`);
         return;
       }
 
+      state.lastCall = { at: new Date().toISOString(), ok: true };
       state.cost += result.cost || 0;
 
       // Topic-shift notice goes to the user, not Claude: only the user can run

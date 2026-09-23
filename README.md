@@ -18,8 +18,9 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
 - **Codex routing (only if you use Codex).** With the Codex plugin installed,
   self-contained coding work goes to a Codex model picked by size, and all
   self-contained work moves to Codex when your Claude plan runs low.
-- **Status line (optional).** Context, Claude 5-hour and 7-day usage, cache
-  health, git, cost, plus a Codex usage line when Codex is available.
+- **Status line (optional).** Router state and OpenRouter access, context,
+  Claude 5-hour and 7-day usage, cache health, git, cost, plus a Codex usage
+  line when Codex is available.
 
 Everything else is opt-in (see [Optional features](#optional-features)).
 
@@ -100,7 +101,20 @@ Plugins can't set Claude Code's main status line, so this is a separate step:
 ```
 
 It saves your current status line and `/mynameisjev:statusline uninstall`
-puts it back. The status line also records your Claude plan usage, which the
+puts it back.
+
+Line 1 shows the router's state next to the model:
+
+| Shows | Meaning |
+| --- | --- |
+| `JEV ✓` | On, and the last Jev call succeeded |
+| `JEV on` | On, key present, no call made yet |
+| `JEV no key` | On, but `OPENROUTER_API_KEY` isn't set |
+| `JEV HTTP 401`, `JEV timeout`, … | On, and the last Jev call failed with this error |
+| `JEV off` | Router off |
+
+The check reuses the outcome of the router's last call, so the status line
+never calls the API itself. The status line also records your Claude plan usage, which the
 router needs for its limit-aware features; without it those stay quiet.
 
 ### 5. Codex (optional)

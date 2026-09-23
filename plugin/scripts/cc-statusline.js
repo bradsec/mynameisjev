@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Claude Code Statusline - Enhanced Edition
-// Shows pretty bars for: context usage, session (5h) usage, weekly (7d) usage
+// Shows pretty bars for: context usage, session (5h) usage, weekly (7d) usage,
+// plus the Jev router state (on/off, OpenRouter access)
 // Line 2: git status + token counts
 // Line 3: Codex plan usage, while the codex plugin is enabled
 
@@ -102,6 +103,26 @@ function resetSuffix(epochSec, withDay) {
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   const day = withDay ? `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ` : '';
   return mutedGray(` ↺ ${day}${hm}`);
+}
+
+// ── Jev router state (line 1) ─────────────────────────────────────────────────
+// Whether the router is on and its OpenRouter access works. "Works" comes from
+// the outcome of the router's last Jev call (state.lastCall), so rendering
+// never calls the API. Returns '' when the Jev state can't be read.
+function jevSegment() {
+  let state;
+  try {
+    state = require('./jev-state').readState();
+  } catch (_) {
+    return '';
+  }
+  const label = cyan(bold('JEV'));
+  if (!state.enabled) return `${label} ${mutedGray('off')}`;
+  if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
+  const last = state.lastCall;
+  if (!last) return `${label} ${amber('on')}`;
+  if (!last.ok) return `${label} ${red(String(last.error || 'error').slice(0, 24))}`;
+  return `${label} ${green('✓')}`;
 }
 
 // ── Codex usage (third line) ──────────────────────────────────────────────────
@@ -407,7 +428,7 @@ process.stdin.on('end', () => {
     }
 
     // ── Assemble output ────────────────────────────────────────────────────
-    // Line 1: Name · Plan │ ModelName [effort] │ active task │ CTX ████░░░░ nn% · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn%
+    // Line 1: Name · Plan │ ModelName [effort] │ JEV ✓ │ active task │ CTX ████░░░░ nn% · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn%
     // Line 2: dirname · remote · GIT branch · ~n · ↑n · ↓n · TOK IN nn.nk / nnnk · OUT nn.nk · $ n.nn · CACHE ████░░ nn%
     // Line 3: CODEX plan · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn% ↺Day HH:MM · LIMIT REACHED (codex plugin enabled only)
     //
@@ -435,6 +456,7 @@ process.stdin.on('end', () => {
     const leftParts = [
       acctPart,
       softBlue(model) + effort,
+      jevSegment() || null,
       task ? bold(yellow(task)) : null,
     ].filter(Boolean).join(sep);
 

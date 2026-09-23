@@ -31,6 +31,9 @@ const DEFAULT_STATE = {
   },
   cost: 0,
   lastSilent: null,
+  // Outcome of the most recent Jev API call, shown by the status line:
+  // { at, ok, error? }.
+  lastCall: null,
   // Previous prompt of the current session, for topic-shift detection.
   lastPrompt: null,
   // Last Claude usage notice shown, so each threshold crossing shows once.
