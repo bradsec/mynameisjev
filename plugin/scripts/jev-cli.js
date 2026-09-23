@@ -137,10 +137,13 @@ async function limits() {
   if (l.primary) console.log(fmtWindow('5h', l.primary.usedPercent, l.primary.resetsAt));
   if (l.secondary) console.log(fmtWindow('weekly', l.secondary.usedPercent, l.secondary.resetsAt));
   console.log(`  plan: ${l.planType || 'unknown'}${l.reachedType ? `, limit reached (${l.reachedType})` : ''}`);
+  const TH = require('./jev-router').THRESHOLDS;
   print([
-    'Routing: self-contained coding work goes to Codex while Codex is under 85%;',
-    'all self-contained work goes to Codex once Claude passes 85%; at 90% Jev suggests /codex:transfer' +
-      (state.autoTransfer ? '; from 95% it copies the session into Codex on every prompt.' : '.'),
+    `Routing: self-contained coding work goes to Codex while Codex is under ${TH.codexMax}%.`,
+    `From ${TH.route}% Claude usage, work moves to Codex (whole tasks, or their self-contained steps);`,
+    `at ${TH.transfer}% Jev warns and suggests /codex:transfer` +
+      (state.autoTransfer ? `; from ${TH.auto}% it copies the session into Codex.` : '.'),
+    'Usage is also checked after each tool call, so a long turn crossing a threshold is caught mid-turn.',
   ]);
 }
 
@@ -202,7 +205,7 @@ async function transferCommand([arg]) {
     if (state.autoTransfer && !codex.codexAvailable()) console.log('Note: Codex is not available, so nothing is transferred until it is.');
     return;
   }
-  console.log(`Auto-transfer: ${onOff(state.autoTransfer)}. From 95% Claude usage, copies the session into a new Codex thread on every prompt and shows the codex resume command. usage: /mynameisjev:transfer [on | off]`);
+  console.log(`Auto-transfer: ${onOff(state.autoTransfer)}. From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the codex resume command. usage: /mynameisjev:transfer [on | off]`);
 }
 
 async function updateCommand([arg]) {

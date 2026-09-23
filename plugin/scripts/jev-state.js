@@ -40,7 +40,7 @@ const DEFAULT_STATE = {
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
   codexTiers: {},
-  // Copy the session into Codex from 95% Claude usage (`/mynameisjev:transfer on`).
+  // Copy the session into Codex from 90% Claude usage (`/mynameisjev:transfer on`).
   autoTransfer: false,
   lastTransfer: null,
   // Keep caveman active on Claude and Codex (`/mynameisjev:caveman on`).

@@ -28,6 +28,20 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-usage-watch.js"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

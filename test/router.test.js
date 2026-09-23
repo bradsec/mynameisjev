@@ -80,23 +80,40 @@ test('route: low Claude usage sends non-coding work to Codex', () => {
   assert.match(r.note, /Claude 5h usage at 87%/);
 });
 
-test('limit notice: none below 85%', () => {
+test('thresholds: route at 80%, warn at 85%, auto-transfer at 90%', () => {
+  assert.deepStrictEqual(router.THRESHOLDS, { route: 80, transfer: 85, auto: 90, codexMax: 85 });
+  assert.strictEqual(router.limitNoticeFor({ pct: 81, window: '5h', resetsAt: 0 }, codexOk, false).key, '5h:0:route');
+});
+
+test('route: with Claude low, work that needs the conversation gets a sub-step note', () => {
+  const claude = { pct: 82, window: '5h', resetsAt: 0 };
+  const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, claude, claudeLow: true }));
+  assert.strictEqual(r.codex, true);
+  assert.match(r.note, /hand each self-contained step/);
+});
+
+test('route: with Claude fine, work that needs the conversation stays quiet', () => {
+  const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk }));
+  assert.match(r.suppress, /not self-contained/);
+});
+
+test('limit notice: none below 80%', () => {
   assert.strictEqual(router.limitNoticeFor({ pct: 60, window: '5h', resetsAt: 0 }, codexOk, false), null);
 });
 
 test('limit notice: leaves Codex out entirely when unavailable', () => {
-  const n = router.limitNoticeFor({ pct: 92, window: '5h', resetsAt: 0 }, noCodex, true);
+  const n = router.limitNoticeFor({ pct: 87, window: '5h', resetsAt: 0 }, noCodex, true);
   assert.match(n.text, /Close to the limit\.$/);
   assert.doesNotMatch(n.text, /Codex|transfer/);
 });
 
 test('limit notice: suggests /codex:transfer when Codex is available', () => {
-  const n = router.limitNoticeFor({ pct: 92, window: '5h', resetsAt: 0 }, codexOk, false);
+  const n = router.limitNoticeFor({ pct: 87, window: '5h', resetsAt: 0 }, codexOk, false);
   assert.match(n.text, /run \/codex:transfer/);
 });
 
-test('limit notice: auto-transfer takes over from 95%', () => {
-  const claude = { pct: 96, window: '5h', resetsAt: 0 };
+test('limit notice: auto-transfer takes over from 90%', () => {
+  const claude = { pct: 91, window: '5h', resetsAt: 0 };
   assert.strictEqual(router.limitNoticeFor(claude, codexOk, true), null);
   assert.ok(router.limitNoticeFor(claude, codexOk, false), 'still notified when auto-transfer is off');
 });

@@ -155,6 +155,14 @@ function codexLine() {
   if (l.reachedType || l.ordinaryUsageAllowed === false) parts.push(red('LIMIT REACHED'));
   const ageMin = Math.floor((Date.now() - cache.at) / 60000);
   if (ageMin >= 15) parts.push(mutedGray(`${ageMin}m old`));
+  // A recent automatic transfer means Claude is near its limit: keep the
+  // command to continue in Codex in view (it is easy to miss as a notice).
+  try {
+    const last = require('./jev-state').readState().lastTransfer;
+    if (last && Date.now() - Date.parse(last.at) < 5 * 60 * 60 * 1000) {
+      parts.push(red(`→ codex resume ${last.threadId}`));
+    }
+  } catch (_) {}
   return parts.join(mutedGray(' · '));
 }
 

@@ -33,13 +33,16 @@ const updates = require('./jev-updates');
 const modelsPath = path.join(st.dataDir, 'session-models.json');
 // Written by the status line (cc-statusline.js): Claude's 5h/7d plan usage.
 const claudeLimitsPath = path.join(st.dataDir, 'claude-limits.json');
-// Claude plan usage at which self-contained work moves to Codex, and at which
-// the user is told to hand the whole session over with /codex:transfer.
-const CLAUDE_ROUTE_PCT = 85;
-const CLAUDE_TRANSFER_PCT = 90;
-// From here the router copies the session into Codex on every prompt, so an
-// up-to-date `codex resume` target exists when Claude stops answering.
-const AUTO_TRANSFER_PCT = 95;
+// Claude plan usage at which work moves to Codex, and at which the user is
+// told to hand the whole session over with /codex:transfer. Set well below
+// 100%: one long Claude turn can use 10% or more of a 5-hour window, and at
+// 100% Claude can't act at all, not even to hand work over.
+const CLAUDE_ROUTE_PCT = 80;
+const CLAUDE_TRANSFER_PCT = 85;
+// From here the router copies the session into Codex on every prompt (and
+// the usage watch once mid-turn), so an up-to-date `codex resume` target
+// exists when Claude stops answering.
+const AUTO_TRANSFER_PCT = 90;
 // Runs alongside the Jev call inside the 5s hook timeout; a 2.3MB transcript
 // transfers in about 0.4s.
 const TRANSFER_TIMEOUT_MS = 4000;
@@ -231,6 +234,11 @@ function routeAdvice(tier, result, ctx) {
   const coding = result.coding !== null && result.coding >= NOUL_THRESHOLD;
 
   const companion = codex.companionPath();
+  // Work that needs this conversation can't move to Codex whole, but its
+  // self-contained steps can: with Claude low, that is the note to give.
+  if (!contained && ctx.claudeLow && ctx.codexNow.ok && companion) {
+    return { note: subStepAdvice(ctx.claude, companion), codex: true };
+  }
   if (contained && ctx.codexNow.ok && companion && (ctx.claudeLow || coding)) {
     // Same start-up argument as for Claude helpers: a one-line job is
     // cheaper done in place than handed off.
@@ -244,6 +252,15 @@ function routeAdvice(tier, result, ctx) {
 
   const advice = delegationAdvice(tier, result, ctx.sessionFamily);
   return typeof advice === 'string' ? { note: advice, codex: false } : advice;
+}
+
+// Note for Claude when its plan usage is high but the message can't go to
+// Codex whole: keep coordinating here, send the self-contained steps there.
+function subStepAdvice(claude, companion) {
+  return `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). ` +
+    'Keep coordination and decisions here, but hand each self-contained step (tests, file edits, searches, reviews, research) to Codex ' +
+    `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the step, with the context it needs>" (add --write if it should edit files). ` +
+    'Keep your own replies short.';
 }
 
 // User notice once Claude usage crosses a threshold, or null below it. The
@@ -308,6 +325,24 @@ function autoTransfer(transcriptPath, sessionId, cwd) {
         }
       });
   });
+}
+
+// Count a finished transfer and remember its thread for the status line.
+function recordTransfer(state, t) {
+  if (!t.threadId) return;
+  state.stats.transfers += 1;
+  state.lastTransfer = { at: new Date().toISOString(), threadId: t.threadId };
+  writeState(state);
+}
+
+// User notice for an automatic transfer. The resume command gets its own
+// line: it is the one thing the user needs once Claude stops answering.
+function transferNotice(claude, codexNow, t) {
+  const head = `Jev: Claude ${claude.window} usage at ${Math.round(claude.pct)}% ` +
+    `(resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). ${codexNow.text}.`;
+  if (!t.threadId) return `${head} Automatic Codex transfer failed (${t.error}); run /codex:transfer.`;
+  return `${head} This session is copied into Codex up to now (older copies stay; codex delete --force <id> removes one).\n` +
+    `>>> If Claude stops answering, continue in a terminal: ${t.resumeCommand}`;
 }
 
 // Note telling Claude to hand the task to Codex. Calls the companion script
@@ -421,10 +456,13 @@ function looksSkippable(prompt) {
   return false;
 }
 
-// Pure decision helpers, exported for the tests in test/.
+// Pure decision helpers (exported for the tests in test/) and the usage
+// helpers shared with the mid-turn usage watch (jev-usage-watch.js).
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
-  routeAdvice, limitNoticeFor, looksSkippable,
+  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice,
+  claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState,
+  THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
 
 if (require.main === module) main();
@@ -559,10 +597,16 @@ function main() {
       }
 
       const tier = TIER_INFO[result.size] ? result.size : null;
-      if (!tier) {
-        recordSilent(state, 'unsure', `unknown size "${result.size}"`);
-      } else if (result.confidence < 0.6) {
-        recordSilent(state, 'unsure', `${tier} at confidence ${Number(result.confidence).toFixed(2)} (< 0.60)`);
+      if (!tier || result.confidence < 0.6) {
+        recordSilent(state, 'unsure', !tier
+          ? `unknown size "${result.size}"`
+          : `${tier} at confidence ${Number(result.confidence).toFixed(2)} (< 0.60)`);
+        // Unsized work still runs on Claude; with Claude low, point its
+        // self-contained steps at Codex anyway.
+        const companion = codex.companionPath();
+        if (claudeLow && codexNow.ok && companion) {
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claude, companion) };
+        }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
         // sized messages that got no note because delegating would not pay off.
@@ -589,18 +633,8 @@ function main() {
     } finally {
       if (transfer) {
         const t = await transfer;
-        const head = `Jev: Claude ${claude.window} usage at ${Math.round(claude.pct)}% ` +
-          `(resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). ${codexNow.text}.`;
-        if (t.threadId) {
-          state.stats.transfers += 1;
-          state.lastTransfer = { at: new Date().toISOString(), threadId: t.threadId };
-          writeState(state);
-          notices.unshift(`${head} This session is copied into Codex up to your last message; ` +
-            `if Claude stops answering, continue in a terminal with: ${t.resumeCommand} ` +
-            '(each prompt makes a fresh copy; older ones can be removed with codex delete --force <id>).');
-        } else {
-          notices.unshift(`${head} Automatic Codex transfer failed (${t.error}); run /codex:transfer.`);
-        }
+        recordTransfer(state, t);
+        notices.unshift(transferNotice(claude, codexNow, t));
       }
       if (notices.length > 0) output.systemMessage = notices.join('\n');
       if (Object.keys(output).length > 0) process.stdout.write(JSON.stringify(output));

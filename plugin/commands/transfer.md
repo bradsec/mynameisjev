@@ -1,5 +1,5 @@
 ---
-description: Opt-in: from 95% Claude usage, copy the session into Codex on every prompt
+description: Opt-in: from 90% Claude usage, copy the session into Codex on every prompt
 argument-hint: [on | off]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+Claude usage limits are handled well before 100%:
+
+- Thresholds lowered: work moves to Codex from 80% Claude plan usage (was
+  85%), the warning and `/codex:transfer` suggestion come at 85% (was 90%),
+  and auto-transfer starts at 90% (was 95%).
+- New mid-turn usage watch (PostToolUse hook): usage is checked after every
+  tool call, so a long Claude turn that crosses a threshold is caught before
+  it runs out, not at the next message.
+- Messages that need the conversation can't go to Codex whole; above 80%
+  Claude is now told to hand their self-contained steps to Codex instead of
+  getting no note.
+- The `codex resume` command from an automatic transfer gets its own line in
+  the notice and stays on the status line's Codex line for 5 hours.
+
 ## 0.1.2
 
 Security fixes:

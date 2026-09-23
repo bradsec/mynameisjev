@@ -168,7 +168,7 @@ adds a note to Claude's context, or stays silent:
 | Helper model stronger than the session's | "stronger, delegate if quality matters" |
 | Same model, lots of intermediate output | "keeps bulky output out of your context" |
 | Self-contained coding, Codex under 85% | route to Codex |
-| Claude plan at 85% or more, Codex has headroom | route any self-contained work to Codex |
+| Claude plan at 80% or more, Codex has headroom | route self-contained work to Codex; for work that needs the conversation, hand its self-contained steps to Codex |
 
 Codex tasks run through the Codex plugin's own script with one Bash call, not
 through its `codex:codex-rescue` agent, which itself runs on Claude.
@@ -184,9 +184,19 @@ Default Codex models per size (change with `/mynameisjev:codex set`):
 
 Models missing from your Codex account's list fall back to Codex's default.
 
-Usage notices appear once per threshold: at 85% Claude usage (routing moves to
-Codex when available) and at 90% (a warning, plus `/codex:transfer` when Codex
-is available).
+Claude plan usage thresholds, each announced once per usage window:
+
+| Usage | What happens |
+| --- | --- |
+| 80% | Work moves to Codex when available |
+| 85% | Warning; Claude wraps up; `/codex:transfer` suggested when Codex is available |
+| 90% | With auto-transfer on, the session is copied into Codex and the `codex resume` command is shown (and kept on the status line) |
+
+They sit well below 100% on purpose: one long Claude turn can use 10% or more
+of a 5-hour window, and at 100% Claude can't act at all, not even to hand work
+over. For the same reason usage is also checked after every tool call, not
+only when you send a message, so a long turn that crosses a threshold is
+caught mid-turn.
 
 Notes are suggestions. To make Claude follow them without asking, add this to
 your `~/.claude/CLAUDE.md`:
@@ -205,7 +215,7 @@ All off by default, because each one changes things outside the plugin.
 | --- | --- | --- |
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
 | Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
-| Auto-transfer | `/mynameisjev:transfer on` | From 95% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
+| Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
 | Update check | `/mynameisjev:update on` | Checks daily (in the background) for updates to third-party Claude plugins, the Codex CLI and RTK, and tells you. `/mynameisjev:update` applies them |
 
 ### Sync details
