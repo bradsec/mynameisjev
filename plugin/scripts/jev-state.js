@@ -70,6 +70,9 @@ const DEFAULT_STATE = {
   updatesNoticeAt: null,
   // statusLine setting replaced by `/mynameisjev:statusline install`.
   previousStatusLine: null,
+  // 'wrap': the status line records Jev's data but prints previousStatusLine's
+  // output (`/mynameisjev:statusline wrap`); 'full' or null: Jev's own.
+  statusLineMode: null,
 };
 
 // Settings files written by earlier, non-plugin versions of Jev.

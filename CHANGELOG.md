@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.5
+
+- New `/mynameisjev:statusline wrap`: keeps your own status line (its output
+  is printed unchanged) while Jev records the usage and prompt cache data
+  its features need. `install` and `wrap` switch between the two.
+- `/mynameisjev:statusline install` works without an existing
+  `~/.claude/settings.json`, and stops without changing a settings file it
+  can't parse.
+- `/mynameisjev:statusline` and `/mynameisjev:status` warn when a project's
+  `.claude/settings.json` or `settings.local.json` sets its own `statusLine`,
+  which hides Jev's there.
+- Git status in the status line takes one `git status --porcelain=v2
+  --branch` call instead of up to six.
+- Removed the "current task" segment: Claude Code no longer writes the
+  `~/.claude/todos` files it read.
+
 ## 0.3.4
 
 - Session model advice: after 5 messages in a row sized for a cheaper model

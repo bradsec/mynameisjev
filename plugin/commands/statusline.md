@@ -1,6 +1,6 @@
 ---
-description: Install or remove the Jev status line (Claude usage, plus a Codex line when available)
-argument-hint: [install | uninstall]
+description: Install, wrap your own, or remove the Jev status line
+argument-hint: [install | wrap | uninstall]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---

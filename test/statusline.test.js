@@ -86,3 +86,52 @@ test('shares each session\'s prompt cache expiry for the cold-cache guard', () =
   assert.strictEqual(saved.expires_at, 2000000000);
   assert.strictEqual(saved.recache, null);
 });
+
+// Line 2 without colors, for a payload in `dir`.
+function line2(dir) {
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex') };
+  const input = JSON.stringify({ model: { display_name: 'Opus 5.5' }, cwd: dir, workspace: { current_dir: dir, repo: { owner: 'o', name: 'r' } } });
+  const out = execFileSync(process.execPath, [script], { input, env, cwd: dir }).toString();
+  return out.split('\n')[1].replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+test('git: branch, changed files and upstream counts from one status call', () => {
+  const repo = path.join(tmp, 'repo');
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, stdio: 'pipe' });
+  fs.mkdirSync(repo);
+  git('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(repo, 'a'), '1');
+  git('add', 'a');
+  git('commit', '-q', '-m', 'one');
+  assert.match(line2(repo), /GIT main · clean/);
+  fs.writeFileSync(path.join(repo, 'a'), '2');
+  fs.writeFileSync(path.join(repo, 'b'), '1');
+  assert.match(line2(repo), /GIT main · ~2/);
+  // A remote branch one commit behind HEAD: one unpushed commit.
+  git('remote', 'add', 'origin', 'https://example.com/o/r.git');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  git('config', 'branch.main.remote', 'origin');
+  git('config', 'branch.main.merge', 'refs/heads/main');
+  git('commit', '-q', '-am', 'two');
+  assert.match(line2(repo), /GIT main · ~1 · ↑1/);
+  git('checkout', '-q', '--detach');
+  assert.match(line2(repo), /GIT [0-9a-f]{7} · ~1/);
+  assert.doesNotMatch(line2(tmp), /GIT/, 'no git segment outside a repo');
+});
+
+test('wrap mode prints your status line and still records Jev data', () => {
+  const limits = path.join(claudeDir, 'mynameisjev', 'claude-limits.json');
+  fs.rmSync(limits, { force: true });
+  const mine = `"${process.execPath.replace(/\\/g, '/')}" -e "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write('MINE '+JSON.parse(s).model.display_name))"`;
+  const state = { enabled: true, statusLineMode: 'wrap', previousStatusLine: { type: 'command', command: mine } };
+  const input = JSON.stringify({ model: { display_name: 'Opus 5.5' }, rate_limits: { five_hour: { used_percentage: 42, resets_at: 2000000000 } } });
+  assert.strictEqual(line1(state, 'k', input), 'MINE Opus 5.5');
+  assert.strictEqual(JSON.parse(fs.readFileSync(limits, 'utf8')).five_hour.used_percentage, 42);
+});
+
+test('wrap mode: a failing command says so, and never wraps itself', () => {
+  const fail = { enabled: true, statusLineMode: 'wrap', previousStatusLine: { type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" -e "process.exit(3)"` } };
+  assert.match(line1(fail, 'k'), /your status line command failed \(exit 3\)/);
+  const self = { enabled: true, statusLineMode: 'wrap', previousStatusLine: { type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" "${script.replace(/\\/g, '/')}"` } };
+  assert.match(line1(self, 'k'), /Opus 5\.5 │ JEV/, 'the nested run renders the Jev status line');
+});

@@ -113,6 +113,7 @@ async function status() {
       console.log(`${name}: ${claudeSide}${available ? `, Codex ${p.codex}${p.codexVersion ? ` ${p.codexVersion}` : ''}` : ''}`);
     }
   }
+  statusLineOverrideWarnings().forEach((w) => console.log(w));
   if (state.updates) {
     const found = updates.readCache();
     console.log(`Updates: ${found ? `${found.updates.length} available, checked ${new Date(found.checkedAt).toLocaleString()}` : 'not checked yet'}`);
@@ -308,9 +309,11 @@ async function updateCommand([arg]) {
 // launcher into the data directory (its path survives plugin updates, unlike
 // the plugin's versioned install path) and points settings.json at it. The
 // previous statusLine setting is kept in state and restored by `uninstall`.
+// `wrap` installs the same launcher but has it print the previous status
+// line's output, so Jev still gets the usage and cache data it records.
 async function statuslineCommand([arg]) {
   const settingsPath = path.join(st.claudeDir, 'settings.json');
-  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const settings = readSettings(settingsPath);
   const launcher = st.dataFile('statusline.js');
   // Windows runs status line commands through Git Bash or PowerShell; Git Bash
   // strips unquoted backslashes, so give it a forward-slash absolute path.
@@ -318,10 +321,75 @@ async function statuslineCommand([arg]) {
   const command = process.platform === 'win32'
     ? `node "${launcher.replace(/\\/g, '/')}"`
     : `node "${launcher.startsWith(home) ? `$HOME${launcher.slice(home.length)}` : launcher}"`;
-  const installed = settings.statusLine && settings.statusLine.command === command;
+  const current = settings.statusLine || null;
+  const installed = !!current && current.command === command;
+  // The user's own status line: the saved one while ours is installed.
+  const previous = installed ? state.previousStatusLine : current;
 
-  if (arg === 'install') {
-    fs.writeFileSync(launcher, `// Written by /mynameisjev:statusline install. Loads the status line from the
+  if (arg === 'install' || arg === 'wrap') {
+    if (arg === 'wrap' && !(previous && typeof previous.command === 'string' && previous.command.trim())) {
+      throw new Error('there is no status line of your own to wrap. Set one in settings.json first, or use /mynameisjev:statusline install for the Jev status line.');
+    }
+    writeLauncher(launcher);
+    state.previousStatusLine = previous || null;
+    state.statusLineMode = arg === 'wrap' ? 'wrap' : 'full';
+    st.writeState(state);
+    // Wrap keeps the wrapped setting's other fields (padding, refreshInterval).
+    settings.statusLine = arg === 'wrap'
+      ? { ...previous, type: 'command', command }
+      : { type: 'command', command };
+    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+    if (arg === 'wrap') {
+      console.log(`Status line: wrapping your own (${previous.command}). Jev records usage and cache data from it; /mynameisjev:statusline uninstall restores it unwrapped.`);
+    } else {
+      console.log(installed
+        ? 'Status line: Jev status line installed (launcher refreshed).'
+        : `Status line installed.${previous ? ' Your previous status line is saved; /mynameisjev:statusline uninstall restores it, and /mynameisjev:statusline wrap keeps it with Jev\'s data recording.' : ''}`);
+    }
+  } else if (arg === 'uninstall') {
+    if (!installed) {
+      console.log('The mynameisjev status line is not the active one; nothing changed.');
+    } else {
+      if (state.previousStatusLine) settings.statusLine = state.previousStatusLine;
+      else delete settings.statusLine;
+      fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+      state.previousStatusLine = null;
+      state.statusLineMode = null;
+      st.writeState(state);
+      console.log('Status line removed; the previous one is restored.');
+    }
+  } else if (arg) {
+    throw new Error('usage: /mynameisjev:statusline [install | wrap | uninstall]');
+  } else {
+    const mode = !installed ? 'not installed'
+      : state.statusLineMode === 'wrap' ? `installed, wrapping your own (${(state.previousStatusLine || {}).command})`
+        : 'installed';
+    console.log(`Status line: ${mode}. usage: /mynameisjev:statusline [install | wrap | uninstall]`);
+  }
+  statusLineOverrideWarnings().forEach((w) => console.log(w));
+}
+
+// settings.json as an object; {} when it doesn't exist yet. Any other read
+// or parse error stops the command, so a file we can't read is never replaced.
+function readSettings(settingsPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw new Error(`cannot read ${settingsPath}: ${e.message}`);
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (e) {
+    throw new Error(`${settingsPath} is not valid JSON (${e.message}); fix it, then run this again`);
+  }
+  throw new Error(`${settingsPath} does not hold a JSON object; fix it, then run this again`);
+}
+
+function writeLauncher(launcher) {
+  fs.writeFileSync(launcher, `// Written by /mynameisjev:statusline install. Loads the status line from the
 // currently installed mynameisjev plugin version.
 const fs = require('fs');
 const path = require('path');
@@ -333,25 +401,22 @@ try {
   process.stdout.write('mynameisjev status line: plugin not found');
 }
 `);
-    if (!installed) {
-      state.previousStatusLine = settings.statusLine || null;
-      st.writeState(state);
-      settings.statusLine = { type: 'command', command };
-      fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+// Project settings take precedence over ~/.claude/settings.json, so a
+// statusLine set there hides Jev's and the data it records for the router.
+function statusLineOverrideWarnings() {
+  const dir = st.projectDir(process.cwd());
+  if (!dir) return [];
+  const warnings = [];
+  for (const name of ['settings.json', 'settings.local.json']) {
+    const file = path.join(dir, '.claude', name);
+    if (path.resolve(file) === path.resolve(st.claudeDir, 'settings.json')) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { continue; }
+    if (parsed && parsed.statusLine) {
+      warnings.push(`WARNING: ${file} sets its own statusLine, which takes precedence in this project, so Jev's status line and the usage data the router needs are not recorded here. Remove it there to use Jev's.`);
     }
-    console.log(installed ? 'Status line already installed (launcher refreshed).' : 'Status line installed. Your previous status line is saved; /mynameisjev:statusline uninstall restores it.');
-  } else if (arg === 'uninstall') {
-    if (!installed) {
-      console.log('The mynameisjev status line is not the active one; nothing changed.');
-      return;
-    }
-    if (state.previousStatusLine) settings.statusLine = state.previousStatusLine;
-    else delete settings.statusLine;
-    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
-    state.previousStatusLine = null;
-    st.writeState(state);
-    console.log('Status line removed; the previous one is restored.');
-  } else {
-    console.log(`Status line: ${installed ? 'installed' : 'not installed'}. usage: /mynameisjev:statusline [install | uninstall]`);
   }
+  return warnings;
 }

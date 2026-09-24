@@ -4,11 +4,14 @@
 // plus the Jev router state (on/off, OpenRouter access)
 // Line 2: git status + token counts
 // Line 3: Codex plan usage, while the codex plugin is enabled
+//
+// Wrap mode (`/mynameisjev:statusline wrap`) records the same data for the
+// Jev router but prints the user's own status line instead of this one.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 // ── Visual helpers ────────────────────────────────────────────────────────────
 
@@ -22,7 +25,6 @@ function bold(t)       { return color('\x1b[1m',           t); }
 function white(t)      { return color('\x1b[97m',          t); }   // bright white — primary info
 function softBlue(t)   { return color('\x1b[38;5;111m',    t); }   // #87afff — model name
 function cyan(t)       { return color('\x1b[38;5;87m',     t); }   // bright cyan — metric labels
-function yellow(t)     { return color('\x1b[38;5;220m',    t); }   // amber — active task / warnings
 function green(t)      { return color('\x1b[38;5;120m',    t); }   // soft green — healthy
 function amber(t)      { return color('\x1b[38;5;214m',    t); }   // orange-amber — moderate
 function orange(t)     { return color('\x1b[38;5;208m',    t); }   // deep orange — elevated
@@ -137,6 +139,72 @@ function sharePromptCache(session, pc) {
   try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
 }
 
+// Hooks never receive rate_limits, so share them with the Jev router
+// (jev-router.js) through a file. Written only when the numbers change,
+// since the status line re-runs on every update.
+function shareLimits(fiveHour, sevenDay) {
+  const pick = w => (Number.isFinite(w?.used_percentage)
+    ? { used_percentage: w.used_percentage, resets_at: w.resets_at ?? null }
+    : null);
+  const limits = { five_hour: pick(fiveHour), seven_day: pick(sevenDay) };
+  const limitsPath = require('./jev-state').dataFile('claude-limits.json');
+  let prev = null;
+  try { prev = JSON.parse(fs.readFileSync(limitsPath, 'utf8')); } catch (_) {}
+  const unchanged = prev &&
+    JSON.stringify([prev.five_hour, prev.seven_day]) === JSON.stringify([limits.five_hour, limits.seven_day]);
+  if (!unchanged) {
+    try { fs.writeFileSync(limitsPath, JSON.stringify({ at: Date.now(), ...limits })); } catch (_) {}
+  }
+}
+
+// Everything the Jev router needs from the status line payload. Runs in both
+// modes, before rendering, so a slow render can't lose it.
+function recordForJev(data) {
+  try {
+    const fiveHour = data.rate_limits?.five_hour;
+    const sevenDay = data.rate_limits?.seven_day;
+    if (fiveHour || sevenDay) shareLimits(fiveHour, sevenDay);
+    if (data.session_id && data.prompt_cache?.caching_observed) sharePromptCache(data.session_id, data.prompt_cache);
+  } catch (_) {
+    // Never break the status line over the shared files.
+  }
+}
+
+// ── Wrap mode ─────────────────────────────────────────────────────────────────
+// In wrap mode the user's previous status line command renders instead of
+// this one: it gets the same JSON on stdin and its output is printed as is.
+// Claude Code runs status line commands through a shell, so this does too.
+// Returns true when it handled the output.
+const WRAPPED_TIMEOUT_MS = 5000;
+
+function runWrapped(input) {
+  let state;
+  try {
+    state = require('./jev-state').readState();
+  } catch (_) {
+    return false;
+  }
+  const command = state.statusLineMode === 'wrap' && state.previousStatusLine?.command;
+  if (typeof command !== 'string' || !command.trim()) return false;
+  // A wrapped command that is itself this status line would loop forever.
+  if (process.env.JEV_STATUSLINE_WRAPPED) return false;
+  const r = spawnSync(command, {
+    input,
+    env: { ...process.env, JEV_STATUSLINE_WRAPPED: '1' },
+    shell: true,
+    encoding: 'utf8',
+    timeout: WRAPPED_TIMEOUT_MS,
+    windowsHide: true,
+    maxBuffer: 1024 * 1024,
+  });
+  if (r.stdout) process.stdout.write(r.stdout);
+  else if (r.error || r.status !== 0) {
+    const why = r.error?.code === 'ETIMEDOUT' ? `timed out after ${WRAPPED_TIMEOUT_MS / 1000}s` : `exit ${r.status}`;
+    process.stdout.write(mutedGray(`mynameisjev: your status line command failed (${why})`));
+  }
+  return true;
+}
+
 // ── Jev router state (line 1) ─────────────────────────────────────────────────
 // Whether the router is on and its OpenRouter access works. "Works" comes from
 // the outcome of the router's last Jev call (state.lastCall), so rendering
@@ -233,52 +301,61 @@ function getGitInfo(cwd, { skipRemote = false } = {}) {
     try { return execFileSync('git', args, opts).trim(); } catch (_) { return null; }
   };
 
-  // Confirm we're in a git repo (also fails when git is not installed)
-  if (run(['rev-parse', '--git-dir']) === null) return null;
+  // One call gives branch, upstream ahead/behind and the changed files; it
+  // fails outside a repo or without git. The status line re-runs on every
+  // update, so each extra git process shows up as lag in large repos.
+  const status = run(['--no-optional-locks', 'status', '--porcelain=v2', '--branch']);
+  if (status === null) return null;
+  const git = parseGitStatus(status);
+  const remote = skipRemote ? null : getRemote(run);
+  return { ...git, remote };
+}
 
-  // Branch name (or short SHA when detached HEAD)
-  const branch = run(['symbolic-ref', '--short', 'HEAD']) ||
-                 run(['rev-parse', '--short', 'HEAD']) ||
-                 '?';
-
-  // Dirty file count: modified + added + deleted (tracked changes only + untracked)
-  const statusLines = run(['--no-optional-locks', 'status', '--porcelain']) || '';
-  const dirtyCount  = statusLines ? statusLines.split('\n').filter(Boolean).length : 0;
-
-  // Commits ahead of / behind @{upstream}
+// Parses `git status --porcelain=v2 --branch` output.
+function parseGitStatus(status) {
+  let oid = null;
+  let head = null;
   let unpushed = 0;
-  let behind   = 0;
-  if (run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])) {
-    unpushed = parseInt(run(['--no-optional-locks', 'rev-list', '--count', '@{u}..HEAD']), 10) || 0;
-    behind   = parseInt(run(['--no-optional-locks', 'rev-list', '--count', 'HEAD..@{u}']), 10) || 0;
-  }
-
-  // Remote URL for origin (or first remote if origin absent)
-  let remote = null;
-  if (!skipRemote) {
-    const remoteUrl = run(['remote', 'get-url', 'origin']) ||
-                      (() => {
-                        const remotes = run(['remote']);
-                        if (!remotes) return null;
-                        const first = remotes.split('\n').find(Boolean);
-                        return first ? run(['remote', 'get-url', first]) : null;
-                      })();
-    if (remoteUrl) {
-      // Display repository identity without URL credentials, query, or fragment.
-      if (remoteUrl.includes('://')) {
-        try {
-          const url = new URL(remoteUrl);
-          remote = `${url.host}${url.pathname.replace(/\.git$/, '')}`;
-        } catch (_) {
-          remote = null;
-        }
-      } else {
-        remote = remoteUrl.replace(/^[^@/]+@([^:]+):/, '$1/').replace(/\.git$/, '');
-      }
+  let behind = 0;
+  let dirtyCount = 0;
+  for (const line of status.split('\n')) {
+    if (!line) continue;
+    if (!line.startsWith('# ')) { dirtyCount++; continue; }
+    const [key, ...rest] = line.slice(2).split(' ');
+    if (key === 'branch.oid') oid = rest[0];
+    else if (key === 'branch.head') head = rest[0];
+    else if (key === 'branch.ab') {
+      unpushed = Math.abs(parseInt(rest[0], 10)) || 0;
+      behind   = Math.abs(parseInt(rest[1], 10)) || 0;
     }
   }
+  // Detached HEAD shows the short SHA, like `git rev-parse --short`.
+  const branch = head && head !== '(detached)'
+    ? head
+    : (oid && oid !== '(initial)' ? oid.slice(0, 7) : '?');
+  return { branch, dirtyCount, unpushed, behind };
+}
 
-  return { branch, dirtyCount, unpushed, behind, remote };
+// Remote of origin (or the first remote when there is no origin), as
+// host/owner/repo without credentials, query or fragment; null when none.
+function getRemote(run) {
+  const remoteUrl = run(['remote', 'get-url', 'origin']) ||
+                    (() => {
+                      const remotes = run(['remote']);
+                      if (!remotes) return null;
+                      const first = remotes.split('\n').find(Boolean);
+                      return first ? run(['remote', 'get-url', first]) : null;
+                    })();
+  if (!remoteUrl) return null;
+  if (remoteUrl.includes('://')) {
+    try {
+      const url = new URL(remoteUrl);
+      return `${url.host}${url.pathname.replace(/\.git$/, '')}`;
+    } catch (_) {
+      return null;
+    }
+  }
+  return remoteUrl.replace(/^[^@/]+@([^:]+):/, '$1/').replace(/\.git$/, '');
 }
 
 // ── Account / plan ──────────────────────────────────────────────────────────
@@ -289,8 +366,8 @@ function getGitInfo(cwd, { skipRemote = false } = {}) {
 // Honors CLAUDE_CONFIG_DIR. The field is internal/undocumented, so every access
 // is guarded and a missing file or shape is treated as "no account info".
 function getAccountInfo() {
-  // Single config root, mirroring the todos lookup: an explicit CLAUDE_CONFIG_DIR
-  // wins outright so a different account root never leaks the home account.
+  // An explicit CLAUDE_CONFIG_DIR wins outright so a different account root
+  // never leaks the home account.
   const configFile = process.env.CLAUDE_CONFIG_DIR
     ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
     : path.join(os.homedir(), '.claude.json');
@@ -325,6 +402,8 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    recordForJev(data);
+    if (runWrapped(input)) return;
 
     const model    = data.model?.display_name || 'Claude';
     const effort   = data.effort?.level ? mutedGray(` [${data.effort.level}]`) : '';
@@ -332,9 +411,6 @@ process.stdin.on('end', () => {
     const session  = data.session_id || '';
     const dirname  = path.basename(dir);
     const cw       = data.context_window || {};
-
-    const homeDir   = os.homedir();
-    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
 
     function fmtTokens(n) {
       if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -403,7 +479,6 @@ process.stdin.on('end', () => {
         const cause = pc.last_miss_cause?.causes?.[0];
         cachePart += ` ${red(`miss ${pc.misses}${cause ? ` (${cause})` : ''}`)}`;
       }
-      if (session) sharePromptCache(session, pc);
     }
 
     // ── Rate limit bars (claude.ai subscription only) ──────────────────────
@@ -413,48 +488,12 @@ process.stdin.on('end', () => {
     const fiveHour  = data.rate_limits?.five_hour;
     const sevenDay  = data.rate_limits?.seven_day;
 
-    // Hooks never receive rate_limits, so share them with the Jev router
-    // (jev-router.js) through a file. Written only when the numbers change,
-    // since the status line re-runs on every update.
-    if (fiveHour || sevenDay) {
-      const pick = w => (Number.isFinite(w?.used_percentage)
-        ? { used_percentage: w.used_percentage, resets_at: w.resets_at ?? null }
-        : null);
-      const limits = { five_hour: pick(fiveHour), seven_day: pick(sevenDay) };
-      const limitsPath = require('./jev-state').dataFile('claude-limits.json');
-      let prev = null;
-      try { prev = JSON.parse(fs.readFileSync(limitsPath, 'utf8')); } catch (_) {}
-      const unchanged = prev &&
-        JSON.stringify([prev.five_hour, prev.seven_day]) === JSON.stringify([limits.five_hour, limits.seven_day]);
-      if (!unchanged) {
-        try { fs.writeFileSync(limitsPath, JSON.stringify({ at: Date.now(), ...limits })); } catch (_) {}
-      }
-    }
-
     if (Number.isFinite(fiveHour?.used_percentage)) {
       fiveHourPart = metricBar('5H', Math.round(fiveHour.used_percentage), 6) + resetSuffix(fiveHour.resets_at, false);
     }
 
     if (Number.isFinite(sevenDay?.used_percentage)) {
       sevenDayPart = metricBar('7D', Math.round(sevenDay.used_percentage), 6) + resetSuffix(sevenDay.resets_at, true);
-    }
-
-    // ── Current task from todos ────────────────────────────────────────────
-    let task = '';
-    const todosDir = path.join(claudeDir, 'todos');
-    if (session && fs.existsSync(todosDir)) {
-      try {
-        const files = fs.readdirSync(todosDir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
-
-        if (files.length > 0) {
-          const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
-          const inProgress = todos.find(t => t.status === 'in_progress');
-          if (inProgress) task = inProgress.activeForm || '';
-        }
-      } catch (_) {}
     }
 
     // ── Git info ───────────────────────────────────────────────────────────
@@ -491,13 +530,12 @@ process.stdin.on('end', () => {
     }
 
     // ── Assemble output ────────────────────────────────────────────────────
-    // Line 1: Name · Plan │ ModelName [effort] │ JEV ✓ │ active task │ CTX ████░░░░ nn% · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn%
+    // Line 1: Name · Plan │ ModelName [effort] │ JEV ✓ │ CTX ████░░░░ nn% · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn%
     // Line 2: dirname · remote · GIT branch · ~n · ↑n · ↓n · TOK IN nn.nk / nnnk · OUT nn.nk · $ n.nn · CACHE ████░░ nn%
     // Line 3: CODEX plan · 5H ████░░ nn% ↺HH:MM · 7D ████░░ nn% ↺Day HH:MM · LIMIT REACHED (codex plugin enabled only)
     //
     // Visual hierarchy:
     //   - Model: soft blue (ambient context)
-    //   - Task: bold amber (most important left-side info when present)
     //   - Dir: bright white (primary navigation anchor)
     //   - Separators: muted gray (structural, low weight)
     //   - Metric labels: bold cyan (scannable right-side anchors)
@@ -520,7 +558,6 @@ process.stdin.on('end', () => {
       acctPart,
       softBlue(model) + effort,
       jevSegment(data.workspace?.project_dir || dir) || null,
-      task ? bold(yellow(task)) : null,
     ].filter(Boolean).join(sep);
 
     const rightParts = [ctxPart, fiveHourPart, sevenDayPart]

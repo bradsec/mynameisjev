@@ -111,8 +111,28 @@ Plugins can't set Claude Code's main status line, so this is a separate step:
 ```
 
 It saves your current status line and `/mynameisjev:statusline uninstall`
-puts it back. The status line also records your Claude plan usage, which the
-router needs for its limit-aware features; without it those stay quiet.
+puts it back. The status line also records your Claude plan usage and prompt
+cache state, which the router needs for its limit-aware features and the
+cold-cache guard; without it those stay quiet.
+
+To keep a status line of your own, wrap it instead:
+
+```text
+/mynameisjev:statusline wrap
+```
+
+Jev's launcher then records the same data but prints your status line's
+output, unchanged. Your command gets the usual JSON on stdin and runs
+through a shell, as Claude Code runs it (`cmd.exe` on Windows). Its other
+settings, such as `padding` and `refreshInterval`, are kept. `install` and
+`wrap` switch between the two; `uninstall` restores yours unwrapped.
+
+A `statusLine` in a project's `.claude/settings.json` or
+`settings.local.json` takes precedence over yours in `~/.claude`, and then
+neither Jev's status line nor its data recording runs in that project.
+`/mynameisjev:statusline` and `/mynameisjev:status` warn when they see one.
+
+The rest of this section describes Jev's own status line.
 
 Line 1 shows the router's state next to the model:
 
@@ -136,6 +156,7 @@ minutes):
 | `→ sonnet?`, `→ codex gpt-6-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
 | `→ sonnet ✓`, `→ codex gpt-6-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
 | `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on |
+| `off in project`, `project config error` | See [Per-project settings](#per-project-settings) |
 
 ### 5. Codex (optional)
 
@@ -170,7 +191,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
 | `/mynameisjev:prefer` | `codex` routes work to Codex first at any Claude usage; `claude` (default) goes back |
-| `/mynameisjev:statusline` | `install` or `uninstall` the status line |
+| `/mynameisjev:statusline` | `install` Jev's status line, `wrap` your own, or `uninstall` |
 | `/mynameisjev:sync` | Opt-in, see below |
 | `/mynameisjev:caveman` | Opt-in, see below |
 | `/mynameisjev:transfer` | Opt-in, see below |
