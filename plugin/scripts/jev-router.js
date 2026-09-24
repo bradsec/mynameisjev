@@ -18,7 +18,11 @@
 // A project's .claude/mynameisjev.json can turn sizing off or set the
 // Codex preference for that project (jev-state.js readProjectConfig).
 //
-// Contract: never blocks, never slows the prompt down noticeably, and stays
+// With the cold-cache guard on, the first message after the prompt cache
+// expired on a large context is blocked once, so the user can /compact or
+// /clear before paying to re-cache it. Sending it again goes through.
+//
+// Contract: never blocks (except the opt-in cold-cache guard), never slows the prompt down noticeably, and stays
 // silent on any error (missing key, network failure, bad response, timeout).
 // Silent outcomes are recorded in state.lastSilent so `/mynameisjev:status` can tell
 // an error apart from a low-confidence result. Reasons never include prompt
@@ -69,6 +73,15 @@ const NOUL_THRESHOLD = 0.5;
 // Enough transcript tail to hold the last assistant entry; entries carrying
 // large tool results can run to tens of KB.
 const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
+// Written by the status line: each session's prompt cache expiry and the
+// tokens a cold request re-caches.
+const promptCachePath = path.join(st.dataDir, 'prompt-cache.json');
+// Re-cache size from which the cold-cache guard blocks a message.
+const COLD_GUARD_TOKENS = 100000;
+// Messages in a row sized below (or above) the session's model before Jev
+// suggests switching the whole session. Upward needs fewer: quality is at stake.
+const STREAK_DOWN = 5;
+const STREAK_UP = 3;
 
 const readState = st.readState;
 
@@ -182,6 +195,54 @@ function delegationAdvice(tier, result, sessionFamily) {
     return `${head} "${info.agent}" runs the same model as this session (${sessionFamily}), so it saves no cost, but delegating keeps this task's bulky intermediate output out of the main context.`;
   }
   return { suppress: `${tier}: same model as session (${sessionFamily}), little output to isolate` };
+}
+
+// The session's prompt cache when it has gone cold on a context worth
+// guarding, or null: { key, idleSec, ttl, recache }. key identifies this
+// expiry, so the guard blocks once per cold spell.
+function coldCache(sessionId, nowSec) {
+  let pc;
+  try {
+    pc = JSON.parse(fs.readFileSync(promptCachePath, 'utf8'))[sessionId];
+  } catch (e) {
+    return null;
+  }
+  if (!pc || !Number.isFinite(pc.expires_at) || !Number.isFinite(pc.recache)) return null;
+  if (nowSec < pc.expires_at || pc.recache < COLD_GUARD_TOKENS) return null;
+  return { key: `${sessionId}:${pc.expires_at}`, idleSec: nowSec - pc.expires_at, ttl: pc.ttl, recache: pc.recache };
+}
+
+function coldGuardReason(cold) {
+  const mins = Math.round(cold.idleSec / 60);
+  const ago = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  return `Jev cold-cache guard: the prompt cache expired ${ago} ago${cold.ttl ? ` (${cold.ttl} lifetime)` : ''}, ` +
+    `so this message would re-send about ${Math.round(cold.recache / 1000)}k tokens of context at the full cache-write price. ` +
+    'Send it again to go ahead, or run /compact (keeps a summary) or /clear first. ' +
+    'Turn the guard off with /mynameisjev:coldguard off.';
+}
+
+// Tracks messages in a row sized for a weaker (or stronger) model than the
+// session's. Returns { streak, notice }: the streak to store, and a notice
+// for the user once it is long enough (then the streak starts over). Only
+// the user can switch the session model, so the notice goes to them.
+// streak: { session, family, dir: 'down' | 'up', rank, count } or null.
+function modelStreak(streak, sessionId, sessionFamily, tier) {
+  if (!sessionId || !sessionFamily) return { streak: null, notice: null };
+  const sessionRank = MODEL_RANK[sessionFamily];
+  const rank = MODEL_RANK[TIER_INFO[tier].model];
+  const dir = rank < sessionRank ? 'down' : rank > sessionRank ? 'up' : null;
+  if (!dir) return { streak: null, notice: null };
+  const same = streak && streak.session === sessionId && streak.family === sessionFamily && streak.dir === dir;
+  // The model that covers every message in the streak.
+  const next = { session: sessionId, family: sessionFamily, dir, rank: same ? Math.max(streak.rank, rank) : rank, count: same ? streak.count + 1 : 1 };
+  if (next.count < (dir === 'down' ? STREAK_DOWN : STREAK_UP)) return { streak: next, notice: null };
+  const target = Object.keys(MODEL_RANK).find((f) => MODEL_RANK[f] === next.rank);
+  const notice = dir === 'down'
+    ? `Jev: the last ${next.count} messages were sized for ${target} or less, but this session runs ${sessionFamily}. ` +
+      `/model ${target} would cost less per message; the switch re-reads the context uncached once.`
+    : `Jev: the last ${next.count} messages were sized for ${target}, but this session runs ${sessionFamily}. ` +
+      `/model ${target} may give better results for work like this.`;
+  return { streak: null, notice };
 }
 
 // Highest Claude plan usage across the 5h and 7d windows, as saved by the
@@ -536,6 +597,7 @@ function looksSkippable(prompt) {
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
   routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice,
+  coldCache, coldGuardReason, modelStreak,
   claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
@@ -571,6 +633,19 @@ function main() {
         return;
       }
       if (!prompt) return;
+
+      // Before anything else: a blocked message gets no Jev call. Slash
+      // commands pass, so /compact and /clear always work.
+      if (state.coldGuard && sessionId && !prompt.startsWith('/')) {
+        const cold = coldCache(sessionId, Date.now() / 1000);
+        if (cold && state.coldGuardKey !== cold.key) {
+          state.coldGuardKey = cold.key;
+          writeState(state);
+          output.decision = 'block';
+          output.reason = coldGuardReason(cold);
+          return;
+        }
+      }
 
       claude = claudePeak();
       const codexCache = codex.readCache();
@@ -699,7 +774,8 @@ function main() {
       if (result.shift !== null && result.shift >= SHIFT_THRESHOLD) {
         state.stats.shift += 1;
         notices.push(`Jev: this looks like a new task (p ${result.shift.toFixed(2)}). ` +
-          'Run /clear to drop the old context for free, or /compact to keep a summary.');
+          'Run /clear to drop the old context for free, or /compact to keep a summary. ' +
+          '/mynameisjev:handoff first saves a note of the old task to pick up later.');
       }
 
       const tier = TIER_INFO[result.size] ? result.size : null;
@@ -719,6 +795,9 @@ function main() {
         // Tier counts record sizing; `suppressed` (outside the total) counts
         // sized messages that got no note because delegating would not pay off.
         state.stats[tier] += 1;
+        const streak = modelStreak(state.modelStreak, sessionId, sessionFamily, tier);
+        state.modelStreak = streak.streak;
+        if (streak.notice) notices.push(streak.notice);
         const advice = routeAdvice(tier, result, {
           sessionFamily,
           claude,

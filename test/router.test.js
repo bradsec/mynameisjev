@@ -184,3 +184,47 @@ test('override: codex falls back to Claude when unavailable', () => {
   assert.match(r.notice, /"\+codex" ignored/);
   assert.strictEqual(r.route[0], 'claude');
 });
+
+test('model streak: suggests a cheaper session model after 5 smaller messages', () => {
+  let streak = null;
+  let notice = null;
+  for (const tier of ['tiny', 'everyday', 'tiny', 'everyday']) {
+    ({ streak, notice } = router.modelStreak(streak, 's', 'opus', tier));
+    assert.strictEqual(notice, null);
+  }
+  ({ streak, notice } = router.modelStreak(streak, 's', 'opus', 'tiny'));
+  assert.match(notice, /last 5 messages were sized for sonnet or less, but this session runs opus\. \/model sonnet/);
+  assert.strictEqual(streak, null, 'starts over after the notice');
+});
+
+test('model streak: suggests a stronger model after 3 larger messages', () => {
+  let r = router.modelStreak(null, 's', 'sonnet', 'large');
+  r = router.modelStreak(r.streak, 's', 'sonnet', 'hardest');
+  r = router.modelStreak(r.streak, 's', 'sonnet', 'large');
+  assert.match(r.notice, /sized for opus, but this session runs sonnet\. \/model opus may give better results/);
+});
+
+test('model streak: a same-size message, another session or a model switch starts over', () => {
+  const one = router.modelStreak(null, 's', 'opus', 'tiny').streak;
+  assert.strictEqual(router.modelStreak(one, 's', 'opus', 'large').streak, null);
+  assert.strictEqual(router.modelStreak(one, 't', 'opus', 'tiny').streak.count, 1);
+  assert.strictEqual(router.modelStreak(one, 's', 'sonnet', 'tiny').streak.count, 1);
+  assert.strictEqual(router.modelStreak(one, 's', null, 'tiny').streak, null);
+});
+
+test('cold cache: only past expiry and over the size threshold', () => {
+  const file = path.join(tmp, 'claude', 'mynameisjev', 'prompt-cache.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    big: { expires_at: 1000, ttl: '5m', recache: 180000 },
+    small: { expires_at: 1000, ttl: '5m', recache: 20000 },
+    unknown: { expires_at: 1000, ttl: '5m', recache: null },
+  }));
+  assert.strictEqual(router.coldCache('big', 999), null, 'still warm');
+  const cold = router.coldCache('big', 1000 + 75 * 60);
+  assert.deepStrictEqual(cold, { key: 'big:1000', idleSec: 4500, ttl: '5m', recache: 180000 });
+  assert.match(router.coldGuardReason(cold), /expired 1h 15m ago \(5m lifetime\), so this message would re-send about 180k tokens/);
+  assert.strictEqual(router.coldCache('small', 5000), null);
+  assert.strictEqual(router.coldCache('unknown', 5000), null);
+  assert.strictEqual(router.coldCache('missing', 5000), null);
+});

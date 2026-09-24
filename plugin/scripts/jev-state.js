@@ -44,6 +44,12 @@ const DEFAULT_STATE = {
   lastPrompt: null,
   // Session and path of the last unusable project config announced.
   projectNotice: null,
+  // Messages in a row sized off the session's model (jev-router modelStreak).
+  modelStreak: null,
+  // Block the first message after the prompt cache went cold on a large
+  // context (`/mynameisjev:coldguard on`), once per expiry (coldGuardKey).
+  coldGuard: false,
+  coldGuardKey: null,
   // Last Claude usage notice shown, so each threshold crossing shows once.
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).

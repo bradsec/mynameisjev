@@ -17,6 +17,13 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
   your main context. Tiny jobs and jobs that need the conversation stay put.
 - **Topic-shift notices.** Tells you when a message starts an unrelated task,
   so you can `/clear` instead of paying for stale context.
+  `/mynameisjev:handoff` saves a note of the old task first.
+- **Session model advice.** After several messages in a row sized for a
+  cheaper (or stronger) model than the session's, suggests `/model` for the
+  whole session.
+- **Compaction digest.** After a compaction, gives Claude your latest
+  requests, the files it edited and how its last reply ended, in case the
+  summary dropped them.
 - **Codex routing (only if you use Codex).** With the Codex plugin installed,
   self-contained coding work goes to a Codex model picked by size, and all
   self-contained work moves to Codex when your Claude plan runs low.
@@ -157,6 +164,8 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | --- | --- |
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
+| `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
+| `/mynameisjev:coldguard` | Opt-in, see below |
 | `/mynameisjev:report` | Notes given vs hand-offs that ran, and helper subagent token use per model |
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
@@ -181,6 +190,36 @@ adds a note to Claude's context, or stays silent:
 | Same model, lots of intermediate output | "keeps bulky output out of your context" |
 | Self-contained coding, Codex under 85% | route to Codex |
 | Claude plan at 80% or more, Codex has headroom | route self-contained work to Codex; for work that needs the conversation, hand its self-contained steps to Codex |
+
+### Session model advice
+
+Delegation notes work per message. When the whole session runs on the wrong
+model, Jev tells you once the pattern is clear:
+
+- 5 messages in a row sized for a cheaper model than the session's: suggests
+  `/model <cheapest model that covers all of them>`
+- 3 in a row sized for a stronger model: suggests `/model <that model>`
+
+A message sized for the session's own model, or a model switch, starts the
+count over. Switching re-reads the context once without the cache, which the
+notice mentions.
+
+### Topic shifts and handoffs
+
+When Jev flags a new task, `/clear` drops the old context for free. To come
+back to the old task later, run `/mynameisjev:handoff` first: Claude writes
+a short note (goal, done so far, decisions, open items, key files) to
+`~/.claude/mynameisjev/handoffs/<project>-<time>.md`, outside the project so
+it is never committed. Start a later session with `@<that path>`.
+
+### Compaction digest
+
+`PreCompact` hooks can't change what a compaction keeps, so Jev saves a
+digest from the transcript just before it runs and hands it to Claude right
+after (a `SessionStart` hook with source `compact`): your latest 3 requests,
+the files edited or written since the previous compaction, and the end of
+Claude's last reply. It is built locally from the transcript; nothing is
+sent anywhere.
 
 ### Overrides
 
@@ -289,6 +328,7 @@ All off by default, because each one changes things outside the plugin.
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
 | Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
 | Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
+| Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Needs the status line, which records the cache state |
 | Update check | `/mynameisjev:update on` | Checks daily (in the background) for updates to third-party Claude plugins, the Codex CLI and RTK, and tells you. `/mynameisjev:update` applies them |
 
 ### Sync details
@@ -336,8 +376,9 @@ The generated `AGENTS.md`:
 ## Files
 
 Everything the plugin writes lives in `~/.claude/mynameisjev/` (inside
-`CLAUDE_CONFIG_DIR` when set): settings and stats, usage caches, the status
-line launcher. Uninstalling the plugin leaves this folder; delete it to remove
+`CLAUDE_CONFIG_DIR` when set): settings and stats, usage and prompt cache
+state, compaction digests (deleted once used), handoff notes, the status line
+launcher. Uninstalling the plugin leaves this folder; delete it to remove
 all traces:
 
 | OS | Command |

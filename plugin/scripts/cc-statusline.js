@@ -105,6 +105,38 @@ function resetSuffix(epochSec, withDay) {
   return mutedGray(` ↺ ${day}${hm}`);
 }
 
+// Hooks never receive prompt_cache, so share when each session's cache goes
+// cold and what re-caching would cost with the Jev router's cold-cache guard
+// (jev-router.js). Keyed by session; a reply with no cache tokens has a null
+// expires_at, so the last known expiry is kept. Written only on change.
+const PROMPT_CACHE_KEEP_MS = 2 * 24 * 60 * 60 * 1000;
+
+function sharePromptCache(session, pc) {
+  let file;
+  let all = {};
+  try {
+    file = require('./jev-state').dataFile('prompt-cache.json');
+    all = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    if (!file) return;
+  }
+  const prev = all[session] || {};
+  const next = {
+    expires_at: Number.isFinite(pc.expires_at) ? pc.expires_at : (prev.expires_at ?? null),
+    ttl: pc.ttl || prev.ttl || null,
+    // null right after a compaction, until the next reply: the old size no
+    // longer applies, so don't keep it.
+    recache: Number.isFinite(pc.recache_tokens_if_cold) ? pc.recache_tokens_if_cold : null,
+  };
+  if (JSON.stringify([prev.expires_at, prev.ttl, prev.recache]) === JSON.stringify([next.expires_at, next.ttl, next.recache])) return;
+  const now = Date.now();
+  for (const [id, v] of Object.entries(all)) {
+    if (!v || !(now - v.at < PROMPT_CACHE_KEEP_MS)) delete all[id];
+  }
+  all[session] = { ...next, at: now };
+  try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
+}
+
 // ── Jev router state (line 1) ─────────────────────────────────────────────────
 // Whether the router is on and its OpenRouter access works. "Works" comes from
 // the outcome of the router's last Jev call (state.lastCall), so rendering
@@ -371,6 +403,7 @@ process.stdin.on('end', () => {
         const cause = pc.last_miss_cause?.causes?.[0];
         cachePart += ` ${red(`miss ${pc.misses}${cause ? ` (${cause})` : ''}`)}`;
       }
+      if (session) sharePromptCache(session, pc);
     }
 
     // ── Rate limit bars (claude.ai subscription only) ──────────────────────

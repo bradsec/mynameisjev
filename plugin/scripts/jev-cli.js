@@ -21,7 +21,7 @@ const onOff = (b) => (b ? 'on' : 'off');
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
-  report,
+  report, coldguard: coldguardCommand, handoff: handoffPath,
 };
 
 (async () => {
@@ -100,7 +100,7 @@ async function status() {
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
   }
 
-  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}`);
+  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}`);
   if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
   if (state.sync) {
     const rtk = sync.rtkStatus();
@@ -253,6 +253,23 @@ async function preferCommand([arg]) {
   } else {
     console.log('Prefer: claude. Work goes to Codex only for self-contained coding tasks, or once Claude usage passes the routing threshold.');
   }
+}
+
+async function coldguardCommand([arg]) {
+  if (toggle('coldGuard', 'Cold-cache guard', arg)) return;
+  if (arg) throw new Error('usage: /mynameisjev:coldguard [on | off]');
+  console.log(`Cold-cache guard: ${onOff(state.coldGuard)}. When on, the first message after the prompt cache expired on a context of 100k tokens or more is blocked once, so you can /compact or /clear first; sending it again goes through. Needs the mynameisjev status line. usage: /mynameisjev:coldguard [on | off]`);
+}
+
+// A new file for /mynameisjev:handoff to write, outside the project so it is
+// never committed: <data dir>/handoffs/<project>-<YYYYMMDD-HHMMSS>.md.
+async function handoffPath() {
+  const dir = st.projectDir(process.cwd());
+  const name = path.basename(dir || 'session').replace(/[^A-Za-z0-9._-]/g, '-') || 'session';
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const folder = path.join(st.dataDir, 'handoffs');
+  fs.mkdirSync(folder, { recursive: true });
+  console.log(path.join(folder, `${name}-${stamp}.md`));
 }
 
 async function transferCommand([arg]) {

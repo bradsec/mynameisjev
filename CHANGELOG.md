@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.4
+
+- Session model advice: after 5 messages in a row sized for a cheaper model
+  than the session's (or 3 for a stronger one), Jev suggests `/model` for
+  the whole session.
+- Compaction digest: a `PreCompact` hook saves your latest requests, the
+  files edited and the end of Claude's last reply, and a `SessionStart`
+  hook gives them to Claude right after the compaction.
+- New `/mynameisjev:handoff`: Claude writes a note of the current task to
+  `~/.claude/mynameisjev/handoffs/`, to `/clear` and pick it up later. The
+  topic-shift notice mentions it.
+- New opt-in `/mynameisjev:coldguard on`: blocks the first message after the
+  prompt cache expired on a context of 100k tokens or more, once, so you can
+  `/compact` or `/clear` first. The status line now records each session's
+  cache expiry for it.
+
 ## 0.3.3
 
 - Likely secrets (API keys, tokens, private keys, `password=...`-style

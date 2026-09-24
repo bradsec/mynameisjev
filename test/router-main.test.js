@@ -26,8 +26,8 @@ global.fetch = async (url, opts) => {
 };
 `);
 
-function run(prompt, { key = 'sk-test', config } = {}) {
-  fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true }));
+function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = false } = {}) {
+  if (!keepState) fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true, ...over }));
   const cfg = path.join(project, '.claude', 'mynameisjev.json');
   if (config === undefined) fs.rmSync(cfg, { force: true });
   else fs.writeFileSync(cfg, config);
@@ -88,4 +88,26 @@ test('helper notes are counted', () => {
   const r = run('Write a short email to my landlord about the faucet.');
   assert.strictEqual(r.bodies.length, 1);
   assert.strictEqual(r.state.stats.helper, 1);
+});
+
+test('cold-cache guard blocks once per expiry, never slash commands, only when on', () => {
+  const expired = Math.floor(Date.now() / 1000) - 600;
+  fs.writeFileSync(path.join(dataDir, 'prompt-cache.json'), JSON.stringify({ s1: { expires_at: expired, ttl: '5m', recache: 150000 } }));
+  const msg = 'Write a short email to my landlord about the faucet.';
+
+  const off = run(msg);
+  assert.strictEqual(off.out.decision, undefined);
+
+  const blocked = run(msg, { state: { coldGuard: true } });
+  assert.strictEqual(blocked.out.decision, 'block');
+  assert.match(blocked.out.reason, /about 150k tokens/);
+  assert.strictEqual(blocked.bodies.length, 0, 'no Jev call for a blocked message');
+
+  const again = run(msg, { keepState: true });
+  assert.strictEqual(again.out.decision, undefined, 'the resend goes through');
+  assert.strictEqual(again.bodies.length, 1);
+
+  const slash = run('/compact keep the API notes', { state: { coldGuard: true } });
+  assert.strictEqual(slash.out.decision, undefined);
+  fs.rmSync(path.join(dataDir, 'prompt-cache.json'));
 });
