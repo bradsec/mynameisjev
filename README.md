@@ -110,8 +110,12 @@ Plugins can't set Claude Code's main status line, so this is a separate step:
 /mynameisjev:statusline install
 ```
 
-It saves your current status line and `/mynameisjev:statusline uninstall`
-puts it back. The status line also records your Claude plan usage and prompt
+It saves your current status line (in Jev's state and in
+`~/.claude/statusline.jev-backup.json`, so it survives deleting
+`~/.claude/mynameisjev`) and `/mynameisjev:statusline uninstall` puts it
+back. Install renders the status line once and warns if that fails. It sets
+`refreshInterval` to 60 seconds, so the Codex line and the cache countdown
+stay current while the session is idle. The status line also records your Claude plan usage and prompt
 cache state, which the router needs for its limit-aware features and the
 cold-cache guard; without it those stay quiet.
 
@@ -126,13 +130,17 @@ output, unchanged. Your command gets the usual JSON on stdin and runs
 through a shell, as Claude Code runs it (`cmd.exe` on Windows). Its other
 settings, such as `padding` and `refreshInterval`, are kept. `install` and
 `wrap` switch between the two; `uninstall` restores yours unwrapped.
+`/mynameisjev:statusline wrap --with-jev` adds the JEV segment (router state
+and where the latest message went) on its own line after yours.
 
 A `statusLine` in a project's `.claude/settings.json` or
 `settings.local.json` takes precedence over yours in `~/.claude`, and then
 neither Jev's status line nor its data recording runs in that project.
 `/mynameisjev:statusline` and `/mynameisjev:status` warn when they see one.
 
-The rest of this section describes Jev's own status line.
+The rest of this section describes Jev's own status line. It follows
+[`NO_COLOR`](https://no-color.org), and on narrow terminals it drops the
+account name first, then shortens the usage bars, then the reset times.
 
 Line 1 shows the router's state next to the model:
 
@@ -191,7 +199,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
 | `/mynameisjev:prefer` | `codex` routes work to Codex first at any Claude usage; `claude` (default) goes back |
-| `/mynameisjev:statusline` | `install` Jev's status line, `wrap` your own, or `uninstall` |
+| `/mynameisjev:statusline` | `install` Jev's status line, `wrap [--with-jev]` your own, or `uninstall` |
 | `/mynameisjev:sync` | Opt-in, see below |
 | `/mynameisjev:caveman` | Opt-in, see below |
 | `/mynameisjev:transfer` | Opt-in, see below |
@@ -349,7 +357,7 @@ All off by default, because each one changes things outside the plugin.
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
 | Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
 | Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
-| Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Needs the status line, which records the cache state |
+| Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Jev's status line shows `guard armed` next to the cold cache when the next message would be blocked. Needs the status line, which records the cache state |
 | Update check | `/mynameisjev:update on` | Checks daily (in the background) for updates to third-party Claude plugins, the Codex CLI and RTK, and tells you. `/mynameisjev:update` applies them |
 
 ### Sync details

@@ -135,3 +135,68 @@ test('wrap mode: a failing command says so, and never wraps itself', () => {
   const self = { enabled: true, statusLineMode: 'wrap', previousStatusLine: { type: 'command', command: `"${process.execPath.replace(/\\/g, '/')}" "${script.replace(/\\/g, '/')}"` } };
   assert.match(line1(self, 'k'), /Opus 5\.5 │ JEV/, 'the nested run renders the Jev status line');
 });
+
+// Full output with colors kept, for a state, payload and extra environment.
+function render(state, input, extraEnv = {}) {
+  fs.writeFileSync(path.join(claudeDir, 'mynameisjev', 'state.json'), JSON.stringify(state));
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex'), OPENROUTER_API_KEY: 'k', ...extraEnv };
+  delete env.NO_COLOR;
+  delete env.COLUMNS;
+  Object.assign(env, extraEnv);
+  return execFileSync(process.execPath, [script], { input: JSON.stringify(input), env, cwd: tmp }).toString();
+}
+const plain = (t) => t.replace(/\x1b\[[0-9;]*m/g, '');
+const later = Math.floor(Date.now() / 1000) + 3600;
+const busy = {
+  model: { display_name: 'Opus 5.5' },
+  context_window: { used_percentage: 40 },
+  rate_limits: { five_hour: { used_percentage: 95, resets_at: later }, seven_day: { used_percentage: 20, resets_at: later } },
+};
+
+test('NO_COLOR turns colors off; critical usage is bold, not blinking', () => {
+  const colored = render({ enabled: true }, busy);
+  assert.ok(colored.includes('\x1b['));
+  assert.ok(!colored.includes('\x1b[5;'), 'no blink');
+  assert.ok(!render({ enabled: true }, busy, { NO_COLOR: '1' }).includes('\x1b['));
+});
+
+test('narrow terminals: account goes first, then bar length, then reset times', () => {
+  fs.writeFileSync(path.join(claudeDir, '.claude.json'), JSON.stringify({ oauthAccount: { displayName: 'Sam', organizationType: 'claude_max' } }));
+  const wide = plain(render({ enabled: true }, busy, { COLUMNS: '300' })).split('\n')[0];
+  assert.match(wide, /^Sam · Max │ Opus 5\.5/);
+  const cols = (n) => plain(render({ enabled: true }, busy, { COLUMNS: String(n) })).split('\n')[0];
+  const noAccount = cols(wide.length - 1);
+  assert.match(noAccount, /^Opus 5\.5/);
+  assert.match(noAccount, /CTX █{3}░{5}/);
+  const compact = cols(noAccount.length - 1);
+  assert.match(compact, /CTX ██░░ 40%/);
+  assert.match(compact, /↺/);
+  const tightest = cols(20);
+  assert.doesNotMatch(tightest, /↺/);
+  assert.match(tightest, /5H ███ 95%/);
+});
+
+test('account info is re-read when ~/.claude.json changes', () => {
+  const file = path.join(claudeDir, '.claude.json');
+  fs.writeFileSync(file, JSON.stringify({ oauthAccount: { displayName: 'Sam' } }));
+  assert.match(plain(render({ enabled: true }, busy)), /^Sam │/);
+  fs.writeFileSync(file, JSON.stringify({ oauthAccount: { displayName: 'Alexandra' } }));
+  assert.match(plain(render({ enabled: true }, busy)), /^Alexandra │/);
+  fs.rmSync(file);
+});
+
+test('cold-cache guard shows armed until it has blocked this cold spell', () => {
+  const past = Math.floor(Date.now() / 1000) - 60;
+  const input = { ...busy, session_id: 's9', prompt_cache: { caching_observed: true, warm: false, expires_at: past, recache_tokens_if_cold: 150000 } };
+  assert.match(plain(render({ enabled: true, coldGuard: true }, input)), /cold re-cache 150\.0k guard armed/);
+  assert.doesNotMatch(plain(render({ enabled: true, coldGuard: true, coldGuardKey: `s9:${past}` }, input)), /guard armed/);
+  assert.doesNotMatch(plain(render({ enabled: true }, input)), /guard armed/);
+  const small = { ...input, prompt_cache: { ...input.prompt_cache, recache_tokens_if_cold: 5000 } };
+  assert.doesNotMatch(plain(render({ enabled: true, coldGuard: true }, small)), /guard armed/);
+});
+
+test('wrap --with-jev adds the JEV segment on its own line', () => {
+  const mine = `"${process.execPath.replace(/\\/g, '/')}" -e "process.stdout.write('MINE\\n')"`;
+  const out = plain(render({ enabled: true, statusLineMode: 'wrap', statusLineJev: true, previousStatusLine: { type: 'command', command: mine } }, busy));
+  assert.strictEqual(out, 'MINE\nJEV on');
+});

@@ -15,10 +15,12 @@ const { execFileSync, spawnSync } = require('child_process');
 
 // ── Visual helpers ────────────────────────────────────────────────────────────
 
-// ANSI helpers — reset is explicit so colors never bleed across segments
+// ANSI helpers — reset is explicit so colors never bleed across segments.
+// NO_COLOR (https://no-color.org): any non-empty value turns colors off.
 const R = '\x1b[0m';
+const NO_COLOR = !!process.env.NO_COLOR;
 
-function color(ansi, text) { return `${ansi}${text}${R}`; }
+function color(ansi, text) { return NO_COLOR ? String(text) : `${ansi}${text}${R}`; }
 
 // Named palette — every color defined once, used by name throughout
 function bold(t)       { return color('\x1b[1m',           t); }
@@ -29,16 +31,16 @@ function green(t)      { return color('\x1b[38;5;120m',    t); }   // soft green
 function amber(t)      { return color('\x1b[38;5;214m',    t); }   // orange-amber — moderate
 function orange(t)     { return color('\x1b[38;5;208m',    t); }   // deep orange — elevated
 function red(t)        { return color('\x1b[38;5;203m',    t); }   // soft red — high
-function blink_red(t)  { return color('\x1b[5;38;5;196m',  t); }   // blinking bright red — critical
+function critical(t)   { return color('\x1b[1;38;5;196m',  t); }   // bold bright red — critical (no blink: distracting, not supported everywhere)
 function mutedGray(t)  { return color('\x1b[38;5;244m',    t); }   // separator / secondary
 
-// Color ramp for usage bars — green → amber → orange → red → blink
+// Color ramp for usage bars — green → amber → orange → red → bold red
 function usageColor(pct, text) {
   if (pct <  50) return green(text);
   if (pct <  65) return amber(text);
   if (pct <  80) return orange(text);
   if (pct <  92) return red(text);
-  return blink_red(text);
+  return critical(text);
 }
 
 // Build a labelled metric block with distinct label styling:
@@ -170,20 +172,35 @@ function recordForJev(data) {
   }
 }
 
+// The cold-cache guard will block the next message (jev-router.js coldCache):
+// on, this cold spell not blocked yet, and a re-cache big enough to guard.
+function coldGuardArmed(state, session, pc) {
+  if (!state?.enabled || !state.coldGuard || !session) return false;
+  const { COLD_GUARD_TOKENS } = require('./jev-state');
+  // A reply with no cache tokens has a null expires_at; the shared file keeps
+  // the last known one, which is the expiry the guard keys on.
+  let expires = pc.expires_at;
+  if (!Number.isFinite(expires)) {
+    try {
+      expires = JSON.parse(fs.readFileSync(require('./jev-state').dataFile('prompt-cache.json'), 'utf8'))[session]?.expires_at;
+    } catch (_) {
+      return false;
+    }
+  }
+  return Number.isFinite(expires) && Number.isFinite(pc.recache_tokens_if_cold) &&
+    pc.recache_tokens_if_cold >= COLD_GUARD_TOKENS && state.coldGuardKey !== `${session}:${expires}`;
+}
+
 // ── Wrap mode ─────────────────────────────────────────────────────────────────
 // In wrap mode the user's previous status line command renders instead of
-// this one: it gets the same JSON on stdin and its output is printed as is.
+// this one: it gets the same JSON on stdin and its output is printed as is,
+// followed by the JEV segment on its own line when statusLineJev is set.
 // Claude Code runs status line commands through a shell, so this does too.
 // Returns true when it handled the output.
 const WRAPPED_TIMEOUT_MS = 5000;
 
-function runWrapped(input) {
-  let state;
-  try {
-    state = require('./jev-state').readState();
-  } catch (_) {
-    return false;
-  }
+function runWrapped(input, data, state) {
+  if (!state) return false;
   const command = state.statusLineMode === 'wrap' && state.previousStatusLine?.command;
   if (typeof command !== 'string' || !command.trim()) return false;
   // A wrapped command that is itself this status line would loop forever.
@@ -197,12 +214,31 @@ function runWrapped(input) {
     windowsHide: true,
     maxBuffer: 1024 * 1024,
   });
-  if (r.stdout) process.stdout.write(r.stdout);
-  else if (r.error || r.status !== 0) {
+  let out = r.stdout ? r.stdout.replace(/\n+$/, '') : '';
+  if (!out && (r.error || r.status !== 0)) {
     const why = r.error?.code === 'ETIMEDOUT' ? `timed out after ${WRAPPED_TIMEOUT_MS / 1000}s` : `exit ${r.status}`;
-    process.stdout.write(mutedGray(`mynameisjev: your status line command failed (${why})`));
+    out = mutedGray(`mynameisjev: your status line command failed (${why})`);
   }
+  if (state.statusLineJev) {
+    const jev = jevSegment(state, data.workspace?.project_dir || data.workspace?.current_dir || data.cwd);
+    if (jev) out = out ? `${out}\n${jev}` : jev;
+  }
+  process.stdout.write(out);
   return true;
+}
+
+// Width of a rendered line in terminal columns: ANSI codes take none, and
+// every character used here (including the bar and arrow glyphs) takes one.
+function visibleWidth(text) {
+  return [...text.replace(/\x1b\[[0-9;]*m/g, '')].length;
+}
+
+// The first layout that fits the terminal, else the most compact one.
+// Claude Code sets COLUMNS for status line commands; without it, the first.
+function fitLine(layouts) {
+  const cols = parseInt(process.env.COLUMNS, 10);
+  if (!Number.isFinite(cols) || cols <= 0) return layouts[0];
+  return layouts.find((l) => visibleWidth(l) <= cols) || layouts[layouts.length - 1];
 }
 
 // ── Jev router state (line 1) ─────────────────────────────────────────────────
@@ -210,13 +246,11 @@ function runWrapped(input) {
 // the outcome of the router's last Jev call (state.lastCall), so rendering
 // never calls the API. Returns '' when the Jev state can't be read.
 // projectDir is checked for a .claude/mynameisjev.json override.
-function jevSegment(projectDir) {
-  let state;
+function jevSegment(state, projectDir) {
+  if (!state) return '';
   let project;
   try {
-    const st = require('./jev-state');
-    state = st.readState();
-    project = st.readProjectConfig(projectDir);
+    project = require('./jev-state').readProjectConfig(projectDir);
   } catch (_) {
     return '';
   }
@@ -253,7 +287,7 @@ function routeSuffix(route) {
 // router keeps (jev-codex.js) so the status line never waits on Codex;
 // a stale cache triggers that module's background refresh (lock-guarded, so
 // frequent status line runs start at most one). Returns '' when unavailable.
-function codexLine() {
+function codexLine(state) {
   let codex;
   try {
     codex = require('./jev-codex');
@@ -279,12 +313,10 @@ function codexLine() {
   if (ageMin >= 15) parts.push(mutedGray(`${ageMin}m old`));
   // A recent automatic transfer means Claude is near its limit: keep the
   // command to continue in Codex in view (it is easy to miss as a notice).
-  try {
-    const last = require('./jev-state').readState().lastTransfer;
-    if (last && Date.now() - Date.parse(last.at) < 5 * 60 * 60 * 1000) {
-      parts.push(red(`→ codex resume ${last.threadId}`));
-    }
-  } catch (_) {}
+  const last = state?.lastTransfer;
+  if (last && Date.now() - Date.parse(last.at) < 5 * 60 * 60 * 1000) {
+    parts.push(red(`→ codex resume ${last.threadId}`));
+  }
   return parts.join(mutedGray(' · '));
 }
 
@@ -372,6 +404,25 @@ function getAccountInfo() {
     ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
     : path.join(os.homedir(), '.claude.json');
 
+  // ~/.claude.json grows with project history, so keep the result keyed on
+  // the file's size and mtime and parse it again only when it changes.
+  let stat;
+  try { stat = fs.statSync(configFile); } catch (_) { return null; }
+  const key = `${configFile}:${stat.size}:${stat.mtimeMs}`;
+  let cacheFile = null;
+  try {
+    cacheFile = require('./jev-state').dataFile('account-cache.json');
+    const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    if (cached.key === key) return cached.info;
+  } catch (_) {}
+  const info = readAccountInfo(configFile);
+  if (cacheFile) {
+    try { fs.writeFileSync(cacheFile, JSON.stringify({ key, info })); } catch (_) {}
+  }
+  return info;
+}
+
+function readAccountInfo(configFile) {
   try {
     const acct = JSON.parse(fs.readFileSync(configFile, 'utf8')).oauthAccount;
     if (!acct) return null;
@@ -403,7 +454,9 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(input);
     recordForJev(data);
-    if (runWrapped(input)) return;
+    let state = null;
+    try { state = require('./jev-state').readState(); } catch (_) {}
+    if (runWrapped(input, data, state)) return;
 
     const model    = data.model?.display_name || 'Claude';
     const effort   = data.effort?.level ? mutedGray(` [${data.effort.level}]`) : '';
@@ -421,12 +474,10 @@ process.stdin.on('end', () => {
     // ── Context bar ────────────────────────────────────────────────────────
     // Prefer used_percentage; otherwise use the complement of
     // remaining_percentage on older clients that do not send it.
-    let ctxPart = '';
-    if (Number.isFinite(cw.used_percentage)) {
-      ctxPart = metricBar('CTX', Math.round(cw.used_percentage), 8);
-    } else if (Number.isFinite(cw.remaining_percentage)) {
-      ctxPart = metricBar('CTX', 100 - cw.remaining_percentage, 8);
-    }
+    // Built per layout (see fitLine): compact layouts use shorter bars.
+    const ctxPct = Number.isFinite(cw.used_percentage) ? Math.round(cw.used_percentage)
+      : Number.isFinite(cw.remaining_percentage) ? 100 - cw.remaining_percentage : null;
+    const ctxPart = (segments) => (ctxPct === null ? '' : metricBar('CTX', ctxPct, segments));
 
     // ── Context occupancy tokens ────────────────────────────────────────────
     // context_window.total_* are the tokens currently in the window (from the
@@ -474,6 +525,7 @@ process.stdin.on('end', () => {
           ? ` re-cache ${fmtTokens(pc.recache_tokens_if_cold)}`
           : '';
         cachePart += ` ${orange(`cold${recache}`)}`;
+        if (coldGuardArmed(state, session, pc)) cachePart += ` ${red('guard armed')}`;
       }
       if (pc.misses > 0) {
         const cause = pc.last_miss_cause?.causes?.[0];
@@ -482,19 +534,11 @@ process.stdin.on('end', () => {
     }
 
     // ── Rate limit bars (claude.ai subscription only) ──────────────────────
-    let fiveHourPart = '';
-    let sevenDayPart = '';
-
     const fiveHour  = data.rate_limits?.five_hour;
     const sevenDay  = data.rate_limits?.seven_day;
-
-    if (Number.isFinite(fiveHour?.used_percentage)) {
-      fiveHourPart = metricBar('5H', Math.round(fiveHour.used_percentage), 6) + resetSuffix(fiveHour.resets_at, false);
-    }
-
-    if (Number.isFinite(sevenDay?.used_percentage)) {
-      sevenDayPart = metricBar('7D', Math.round(sevenDay.used_percentage), 6) + resetSuffix(sevenDay.resets_at, true);
-    }
+    const windowPart = (label, w, withDay, segments, resets) => (Number.isFinite(w?.used_percentage)
+      ? metricBar(label, Math.round(w.used_percentage), segments) + (resets ? resetSuffix(w.resets_at, withDay) : '')
+      : '');
 
     // ── Git info ───────────────────────────────────────────────────────────
     // repo identity comes from the payload when available, so skip the extra
@@ -554,28 +598,34 @@ process.stdin.on('end', () => {
           .join(dotSep)
       : null;
 
-    const leftParts = [
-      acctPart,
-      softBlue(model) + effort,
-      jevSegment(data.workspace?.project_dir || dir) || null,
-    ].filter(Boolean).join(sep);
+    const jevPart = jevSegment(state, data.workspace?.project_dir || dir) || null;
+    const line1For = ({ account, bars, resets }) => {
+      const leftParts = [account ? acctPart : null, softBlue(model) + effort, jevPart]
+        .filter(Boolean).join(sep);
+      const rightParts = [
+        ctxPart(bars ? 8 : 4),
+        windowPart('5H', fiveHour, false, bars ? 6 : 3, resets),
+        windowPart('7D', sevenDay, true, bars ? 6 : 3, resets),
+      ].filter(Boolean).join(dotSep);
+      return rightParts ? leftParts + sep + rightParts : leftParts;
+    };
+    // Narrow terminals: drop the account first, then shorten the bars, then
+    // the reset times.
+    const line1 = fitLine([
+      { account: true, bars: true, resets: true },
+      { account: false, bars: true, resets: true },
+      { account: false, bars: false, resets: true },
+      { account: false, bars: false, resets: false },
+    ].map(line1For));
 
-    const rightParts = [ctxPart, fiveHourPart, sevenDayPart]
-      .filter(Boolean)
-      .join(dotSep);
-
-    const line1 = rightParts
-      ? leftParts + sep + rightParts
-      : leftParts;
-
-    // Line 2: dir (+ remote) · git · tokens · cost · cache
-    let dirPart = white(dirname);
-    if (remoteLabel) {
-      dirPart += dotSep + mutedGray(remoteLabel);
-    }
-
-    const line2Parts = [dirPart, gitPart, tokenPart, costPart, cachePart].filter(Boolean).join(dotSep);
-    const line3      = codexLine();
+    // Line 2: dir (+ remote) · git · tokens · cost · cache; the remote goes
+    // first when it doesn't fit.
+    const line2For = (withRemote) => {
+      const dirPart = white(dirname) + (withRemote && remoteLabel ? dotSep + mutedGray(remoteLabel) : '');
+      return [dirPart, gitPart, tokenPart, costPart, cachePart].filter(Boolean).join(dotSep);
+    };
+    const line2Parts = fitLine([line2For(true), line2For(false)]);
+    const line3      = codexLine(state);
     const output     = [line1, line2Parts, line3].filter(Boolean).join('\n');
 
     process.stdout.write(output);

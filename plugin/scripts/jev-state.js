@@ -73,6 +73,8 @@ const DEFAULT_STATE = {
   // 'wrap': the status line records Jev's data but prints previousStatusLine's
   // output (`/mynameisjev:statusline wrap`); 'full' or null: Jev's own.
   statusLineMode: null,
+  // Wrap mode also prints the JEV segment (`/mynameisjev:statusline wrap --with-jev`).
+  statusLineJev: false,
 };
 
 // Settings files written by earlier, non-plugin versions of Jev.
@@ -137,6 +139,10 @@ function readProjectConfig(dir) {
   return { path: file, router: parsed.router !== false, prefer: parsed.prefer || null, error: null };
 }
 
+// Re-cache size from which the cold-cache guard blocks a message (router)
+// and the status line shows it armed.
+const COLD_GUARD_TOKENS = 100000;
+
 // The project directory a hook or command runs for.
 function projectDir(fallback) {
   return process.env.CLAUDE_PROJECT_DIR || fallback || null;
@@ -144,5 +150,5 @@ function projectDir(fallback) {
 
 module.exports = {
   PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, DEFAULT_STATE, readState, writeState,
-  PROJECT_CONFIG, readProjectConfig, projectDir,
+  PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS,
 };

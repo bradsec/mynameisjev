@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 const st = require('./jev-state');
 const codex = require('./jev-codex');
 const caveman = require('./jev-caveman');
@@ -311,8 +312,13 @@ async function updateCommand([arg]) {
 // previous statusLine setting is kept in state and restored by `uninstall`.
 // `wrap` installs the same launcher but has it print the previous status
 // line's output, so Jev still gets the usage and cache data it records.
-async function statuslineCommand([arg]) {
+// The previous setting is also kept in a file next to settings.json, so
+// `uninstall` can restore it after the data directory is gone.
+async function statuslineCommand([arg, flag]) {
+  // Seconds between timed re-renders of Jev's own status line.
+  const refreshInterval = 60;
   const settingsPath = path.join(st.claudeDir, 'settings.json');
+  const backupPath = path.join(st.claudeDir, 'statusline.jev-backup.json');
   const settings = readSettings(settingsPath);
   const launcher = st.dataFile('statusline.js');
   // Windows runs status line commands through Git Bash or PowerShell; Git Bash
@@ -324,47 +330,59 @@ async function statuslineCommand([arg]) {
   const current = settings.statusLine || null;
   const installed = !!current && current.command === command;
   // The user's own status line: the saved one while ours is installed.
-  const previous = installed ? state.previousStatusLine : current;
+  const previous = installed ? savedPrevious(backupPath) : current;
 
+  if (flag && !(arg === 'wrap' && flag === '--with-jev')) {
+    throw new Error('usage: /mynameisjev:statusline [install | wrap [--with-jev] | uninstall]');
+  }
   if (arg === 'install' || arg === 'wrap') {
     if (arg === 'wrap' && !(previous && typeof previous.command === 'string' && previous.command.trim())) {
       throw new Error('there is no status line of your own to wrap. Set one in settings.json first, or use /mynameisjev:statusline install for the Jev status line.');
     }
     writeLauncher(launcher);
+    writeJsonAtomic(backupPath, { note: 'Your statusLine setting before /mynameisjev:statusline install; uninstall restores it.', statusLine: previous || null });
     state.previousStatusLine = previous || null;
     state.statusLineMode = arg === 'wrap' ? 'wrap' : 'full';
+    state.statusLineJev = arg === 'wrap' && flag === '--with-jev';
     st.writeState(state);
     // Wrap keeps the wrapped setting's other fields (padding, refreshInterval).
+    // Jev's own refreshes on a timer too, so the Codex line and the cache
+    // countdown stay current while the session is idle.
     settings.statusLine = arg === 'wrap'
       ? { ...previous, type: 'command', command }
-      : { type: 'command', command };
-    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+      : { type: 'command', command, refreshInterval };
+    writeJsonAtomic(settingsPath, settings);
     if (arg === 'wrap') {
-      console.log(`Status line: wrapping your own (${previous.command}). Jev records usage and cache data from it; /mynameisjev:statusline uninstall restores it unwrapped.`);
+      console.log(`Status line: wrapping your own (${previous.command})${state.statusLineJev ? ', with the JEV segment on its own line' : ''}. Jev records usage and cache data from it; /mynameisjev:statusline uninstall restores it unwrapped.`);
     } else {
       console.log(installed
         ? 'Status line: Jev status line installed (launcher refreshed).'
         : `Status line installed.${previous ? ' Your previous status line is saved; /mynameisjev:statusline uninstall restores it, and /mynameisjev:statusline wrap keeps it with Jev\'s data recording.' : ''}`);
     }
+    const problem = checkLauncher(launcher);
+    if (problem) console.log(`WARNING: the status line did not render (${problem}). Run /reload-plugins or reinstall the plugin, then /mynameisjev:statusline ${arg} again.`);
   } else if (arg === 'uninstall') {
     if (!installed) {
       console.log('The mynameisjev status line is not the active one; nothing changed.');
     } else {
-      if (state.previousStatusLine) settings.statusLine = state.previousStatusLine;
+      const restore = savedPrevious(backupPath);
+      if (restore) settings.statusLine = restore;
       else delete settings.statusLine;
-      fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+      writeJsonAtomic(settingsPath, settings);
+      fs.rmSync(backupPath, { force: true });
       state.previousStatusLine = null;
       state.statusLineMode = null;
+      state.statusLineJev = false;
       st.writeState(state);
       console.log('Status line removed; the previous one is restored.');
     }
   } else if (arg) {
-    throw new Error('usage: /mynameisjev:statusline [install | wrap | uninstall]');
+    throw new Error('usage: /mynameisjev:statusline [install | wrap [--with-jev] | uninstall]');
   } else {
     const mode = !installed ? 'not installed'
-      : state.statusLineMode === 'wrap' ? `installed, wrapping your own (${(state.previousStatusLine || {}).command})`
+      : state.statusLineMode === 'wrap' ? `installed, wrapping your own (${(previous || {}).command})${state.statusLineJev ? ' with the JEV segment' : ''}`
         : 'installed';
-    console.log(`Status line: ${mode}. usage: /mynameisjev:statusline [install | wrap | uninstall]`);
+    console.log(`Status line: ${mode}. usage: /mynameisjev:statusline [install | wrap [--with-jev] | uninstall]`);
   }
   statusLineOverrideWarnings().forEach((w) => console.log(w));
 }
@@ -386,6 +404,46 @@ function readSettings(settingsPath) {
     throw new Error(`${settingsPath} is not valid JSON (${e.message}); fix it, then run this again`);
   }
   throw new Error(`${settingsPath} does not hold a JSON object; fix it, then run this again`);
+}
+
+// The status line setting saved at install: the backup file when it exists
+// (it survives the data directory being deleted), else the copy in state.
+function savedPrevious(backupPath) {
+  try {
+    return JSON.parse(fs.readFileSync(backupPath, 'utf8')).statusLine || null;
+  } catch (e) {
+    return state.previousStatusLine || null;
+  }
+}
+
+// Replace a JSON file in one step (write a temp file, then rename), so a
+// concurrent reader never sees half a file and a failed write leaves the old
+// one. Writes through a symlink to its target, keeping dotfile setups intact.
+function writeJsonAtomic(file, value) {
+  let target = file;
+  try { target = fs.realpathSync(file); } catch (e) { /* new file */ }
+  const tmp = `${target}.jev-tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  try {
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+// Renders the status line once with sample input. Returns why it failed, or
+// null when it printed something other than the launcher's error.
+function checkLauncher(launcher) {
+  const sample = JSON.stringify({ model: { display_name: 'Claude' }, workspace: { current_dir: process.cwd() }, cwd: process.cwd() });
+  try {
+    const out = execFileSync(process.execPath, [launcher], { input: sample, encoding: 'utf8', timeout: 10000, stdio: ['pipe', 'pipe', 'ignore'] });
+    if (!out.trim()) return 'it printed nothing';
+    if (out.includes('mynameisjev status line: plugin not found')) return 'the installed mynameisjev plugin was not found';
+    return null;
+  } catch (e) {
+    return e.killed ? 'it timed out' : `exit ${e.status}`;
+  }
 }
 
 function writeLauncher(launcher) {

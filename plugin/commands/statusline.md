@@ -1,6 +1,6 @@
 ---
 description: Install, wrap your own, or remove the Jev status line
-argument-hint: [install | wrap | uninstall]
+argument-hint: [install | wrap [--with-jev] | uninstall]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---

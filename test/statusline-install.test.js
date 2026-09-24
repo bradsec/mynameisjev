@@ -71,3 +71,48 @@ test('warns when the project sets its own status line', () => {
   fs.rmSync(path.join(project, '.claude', 'settings.local.json'));
   assert.doesNotMatch(run(), /WARNING/);
 });
+
+test('install sets a refresh interval and keeps a backup that outlives the data directory', () => {
+  const mine = { type: 'command', command: 'my-status' };
+  reset({ statusLine: mine });
+  run('install');
+  assert.strictEqual(settings().statusLine.refreshInterval, 60);
+  const backup = path.join(claudeDir, 'statusline.jev-backup.json');
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(backup, 'utf8')).statusLine, mine);
+  fs.rmSync(path.join(claudeDir, 'mynameisjev'), { recursive: true });
+  assert.match(run('uninstall'), /previous one is restored/);
+  assert.deepStrictEqual(settings().statusLine, mine);
+  assert.ok(!fs.existsSync(backup), 'backup removed after restoring');
+});
+
+test('settings.json behind a symlink stays a symlink', { skip: process.platform === 'win32' }, () => {
+  reset();
+  const real = path.join(tmp, 'dotfiles-settings.json');
+  fs.writeFileSync(real, '{"theme":"dark"}');
+  fs.symlinkSync(real, settingsPath);
+  run('install');
+  assert.ok(fs.lstatSync(settingsPath).isSymbolicLink());
+  assert.strictEqual(JSON.parse(fs.readFileSync(real, 'utf8')).theme, 'dark');
+  assert.ok(JSON.parse(fs.readFileSync(real, 'utf8')).statusLine);
+  assert.deepStrictEqual(fs.readdirSync(tmp).filter((f) => f.includes('jev-tmp')), []);
+});
+
+test('install checks the status line renders', () => {
+  reset({});
+  assert.match(run('install'), /WARNING: the status line did not render \(the installed mynameisjev plugin was not found\)/);
+  const plugins = path.join(claudeDir, 'plugins');
+  fs.mkdirSync(plugins, { recursive: true });
+  fs.writeFileSync(path.join(plugins, 'installed_plugins.json'), JSON.stringify({
+    plugins: { 'mynameisjev@mynameisjev': [{ installPath: path.join(__dirname, '..', 'plugin') }] },
+  }));
+  assert.doesNotMatch(run('install'), /WARNING/);
+});
+
+test('wrap --with-jev, and unknown flags are refused', () => {
+  reset({ statusLine: { type: 'command', command: 'my-status' } });
+  assert.match(run('wrap', '--with-jev'), /with the JEV segment on its own line/);
+  assert.strictEqual(state().statusLineJev, true);
+  run('wrap');
+  assert.strictEqual(state().statusLineJev, false);
+  assert.match(run('install', '--with-jev'), /usage: /);
+});

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.6
+
+- `/mynameisjev:statusline install` also saves your previous status line in
+  `~/.claude/statusline.jev-backup.json`, so `uninstall` can restore it
+  after `~/.claude/mynameisjev` is deleted.
+- `settings.json` is replaced in one step (temp file, then rename), and
+  written through a symlink to its target.
+- Install sets `refreshInterval` to 60 seconds on Jev's status line, and
+  renders it once to warn when it doesn't work.
+- New `/mynameisjev:statusline wrap --with-jev`: your status line plus the
+  JEV segment on its own line.
+- The status line shows `guard armed` when the cold-cache guard will block
+  the next message.
+- Follows `NO_COLOR`. Critical usage is bold red instead of blinking.
+- Fits narrow terminals: drops the account name, then shortens the bars,
+  then the reset times, using the `COLUMNS` Claude Code sets.
+- Reads `~/.claude.json` only when it changes, and the Jev state once per
+  render.
+
 ## 0.3.5
 
 - New `/mynameisjev:statusline wrap`: keeps your own status line (its output

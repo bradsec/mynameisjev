@@ -76,8 +76,7 @@ const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 // Written by the status line: each session's prompt cache expiry and the
 // tokens a cold request re-caches.
 const promptCachePath = path.join(st.dataDir, 'prompt-cache.json');
-// Re-cache size from which the cold-cache guard blocks a message.
-const COLD_GUARD_TOKENS = 100000;
+const { COLD_GUARD_TOKENS } = st;
 // Messages in a row sized below (or above) the session's model before Jev
 // suggests switching the whole session. Upward needs fewer: quality is at stake.
 const STREAK_DOWN = 5;
