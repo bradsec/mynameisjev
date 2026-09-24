@@ -13,11 +13,17 @@
 // headroom. Near Claude's limit the user is told about /codex:transfer, and
 // from AUTO_TRANSFER_PCT the router runs the transfer itself on every prompt.
 //
+// A leading "+tiny", "+everyday", "+large", "+hardest", "+codex[:<size>]" or
+// "+claude" on a message routes it without a Jev call (see parseOverride).
+// A project's .claude/mynameisjev.json can turn sizing off or set the
+// Codex preference for that project (jev-state.js readProjectConfig).
+//
 // Contract: never blocks, never slows the prompt down noticeably, and stays
 // silent on any error (missing key, network failure, bad response, timeout).
 // Silent outcomes are recorded in state.lastSilent so `/mynameisjev:status` can tell
 // an error apart from a low-confidence result. Reasons never include prompt
 // text; the only prompt text stored is state.lastPrompt (see PREVIOUS_CHARS).
+// Likely secrets are stripped (jev-redact.js) from everything sent or stored.
 
 const fs = require('fs');
 const path = require('path');
@@ -28,6 +34,7 @@ const codex = require('./jev-codex');
 const caveman = require('./jev-caveman');
 const sync = require('./jev-sync');
 const updates = require('./jev-updates');
+const { redact } = require('./jev-redact');
 
 // Written by the jev-model-switch PostModelSwitch hook.
 const modelsPath = path.join(st.dataDir, 'session-models.json');
@@ -365,15 +372,67 @@ function transferNotice(claude, codexNow, t) {
 // directly: the plugin's codex:codex-rescue agent is itself a Claude Sonnet
 // subagent, which would spend the Claude usage this route is meant to save.
 function codexAdvice(tier, result, reason, choice, companion) {
+  return `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}). ` +
+    `Route it to Codex (${reason}) ${codexCall(choice, companion)}`;
+}
+
+function codexCall(choice, companion) {
   const flags = [
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
   ].filter(Boolean).join(' ');
-  return `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}). ` +
-    `Route it to Codex (${reason}) with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n` +
+  return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash and PowerShell on Windows too.
     `node "${companion.replace(/\\/g, '/')}" task ${flags} "<the task, self-contained>"\n` +
     'Add --write if Codex should edit files. For long multi-step work add --background and check it later with the companion\'s status/result commands.';
+}
+
+// A routing override at the start of a message: "+large fix the parser".
+// Not "!": a leading "!" puts Claude Code's prompt into bash mode. Returns
+// { target: 'tier' | 'codex' | 'claude', tier, token } or null.
+const OVERRIDE = /^\+(tiny|everyday|large|hardest|claude|codex(?::(tiny|everyday|large|hardest))?)(?=\s|$)/i;
+
+function parseOverride(prompt) {
+  const m = OVERRIDE.exec(prompt.trim());
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  if (word === 'claude') return { target: 'claude', tier: null, token: m[0] };
+  if (word.startsWith('codex')) return { target: 'codex', tier: (m[2] || 'everyday').toLowerCase(), token: m[0] };
+  return { target: 'tier', tier: word, token: m[0] };
+}
+
+// Note and route for an override. Returns { note, route: [target, model, how],
+// notice? } (route as in setRoute); notice goes to the user when Codex was
+// asked for but may not run.
+function overrideAdvice(o, ctx) {
+  const prefix = `The "${o.token}" prefix on this message is a Jev routing override from the user, not part of the task. `;
+  if (o.target === 'claude') {
+    return { note: `${prefix}Handle this message here in this session, without delegating it.`, route: ['claude', ctx.sessionFamily, 'session'] };
+  }
+  if (o.target === 'tier') {
+    const info = TIER_INFO[o.tier];
+    return {
+      note: `${prefix}The user wants it done by the "${info.agent}" subagent (${info.model}). Delegate it without asking, ` +
+        'with a self-contained prompt that carries any context it needs from this conversation.',
+      route: ['claude', info.model, 'suggested'],
+    };
+  }
+  const companion = codex.companionPath();
+  if (!ctx.codexNow.available || !companion) {
+    return {
+      note: `${prefix}The user asked for Codex, but Codex is not available, so handle it here.`,
+      route: ['claude', ctx.sessionFamily, 'session'],
+      notice: 'Jev: "+codex" ignored: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH).',
+    };
+  }
+  const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache);
+  return {
+    note: `${prefix}Route it to Codex ${codexCall(choice, companion)}`,
+    route: ['codex', choice.model || 'default', 'suggested'],
+    // Asked for explicitly, so it goes even when usage looks high; the user
+    // hears why it may fail.
+    notice: ctx.codexNow.ok ? null : `Jev: sending to Codex as asked, but ${ctx.codexNow.text}.`,
+  };
 }
 
 // Asked in the same call as size when a previous prompt from this session is
@@ -391,7 +450,7 @@ const SHIFT_QUESTION = {
 async function classify(prompt, previous, apiKey) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const state = { message: prompt.slice(0, 4000) };
+  const state = { message: redact(prompt).slice(0, 4000) };
   const questions = {
     size: {
       type: 'choice',
@@ -476,7 +535,7 @@ function looksSkippable(prompt) {
 // helpers shared with the mid-turn usage watch (jev-usage-watch.js).
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
-  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice,
+  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice,
   claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
@@ -572,16 +631,42 @@ function main() {
         }
       }
 
+      // Every message runs on the session model unless a note below says
+      // otherwise.
+      const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
+      setRoute(state, 'claude', sessionFamily, 'session');
+
+      const project = st.readProjectConfig(st.projectDir(cwd));
+      if (project && project.error && state.projectNotice !== `${sessionId}:${project.path}`) {
+        state.projectNotice = `${sessionId}:${project.path}`;
+        notices.push(`Jev: ${project.path} is not usable (${project.error}), so Jev does not size messages in this project until it is fixed.`);
+      }
+      const prefer = (project && project.prefer) || state.prefer;
+
+      // Overrides need no Jev call, so they work without a key and in
+      // projects that turn sizing off.
+      const override = parseOverride(prompt);
+      if (override) {
+        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers });
+        state.stats.forced += 1;
+        setRoute(state, ...o.route);
+        state.lastSilent = null;
+        writeState(state);
+        if (o.notice) notices.push(o.notice);
+        output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: o.note };
+        return;
+      }
+
+      if (project && !project.router) {
+        recordSilent(state, 'skipped', project.error ? 'project config unusable' : 'sizing off for this project');
+        return;
+      }
+
       const apiKey = process.env.OPENROUTER_API_KEY;
       if (!apiKey) {
         recordSilent(state, 'failed', 'OPENROUTER_API_KEY not set');
         return;
       }
-
-      // Every message runs on the session model unless a note below says
-      // otherwise.
-      const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
-      setRoute(state, 'claude', sessionFamily, 'session');
 
       if (looksSkippable(prompt)) {
         recordSilent(state, 'skipped', 'short or slash-command message');
@@ -593,7 +678,7 @@ function main() {
       // the request so a failed call still leaves the right baseline.
       const last = state.lastPrompt;
       const previous = sessionId && last && last.session === sessionId ? last.text : null;
-      state.lastPrompt = sessionId ? { session: sessionId, text: prompt.slice(0, PREVIOUS_CHARS) } : null;
+      state.lastPrompt = sessionId ? { session: sessionId, text: redact(prompt).slice(0, PREVIOUS_CHARS) } : null;
 
       let result;
       try {
@@ -625,7 +710,7 @@ function main() {
         // Unsized work still runs on Claude; with Claude low, point its
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();
-        if ((claudeLow || state.prefer === 'codex') && codexNow.ok && companion) {
+        if ((claudeLow || prefer === 'codex') && codexNow.ok && companion) {
           setRoute(state, 'codex', 'steps', 'suggested');
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claudeLow ? claude : null, companion) };
@@ -638,13 +723,14 @@ function main() {
           sessionFamily,
           claude,
           claudeLow,
-          preferCodex: state.prefer === 'codex',
+          preferCodex: prefer === 'codex',
           codexNow,
           codexCache,
           overrides: state.codexTiers,
         });
         if (advice.note) {
           if (advice.codex) state.stats.codex += 1;
+          else state.stats.helper += 1;
           setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested');
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.3
+
+- Likely secrets (API keys, tokens, private keys, `password=...`-style
+  values, credentials in URLs) are replaced with `[REDACTED]` before a
+  message is sent to Jev or stored as the previous prompt.
+- Per-project settings in `<project>/.claude/mynameisjev.json`:
+  `"router": false` stops sizing (nothing is sent) in that project, and
+  `"prefer"` overrides `/mynameisjev:prefer` there. A file that can't be read
+  turns sizing off until fixed. The status line and `/mynameisjev:status`
+  show it.
+- Routing overrides: start a message with `+tiny`, `+everyday`, `+large`,
+  `+hardest`, `+codex` (or `+codex:<size>`) or `+claude` to route it without
+  a Jev call. They work without an API key and in projects with sizing off.
+- New `/mynameisjev:report`: notes given vs hand-offs that ran, per Claude
+  helper and Codex, and the tokens `mynameisjev:*` subagents used per model
+  (read from their transcripts by a new `SubagentStop` hook).
+
 ## 0.3.2
 
 - New `/mynameisjev:prefer codex`: routes work to Codex first at any Claude

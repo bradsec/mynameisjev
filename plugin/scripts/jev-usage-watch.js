@@ -56,6 +56,7 @@ async function watch(hookInput) {
   const ran = handOff(hookInput);
   if (ran) {
     current.route = { at: new Date().toISOString(), ...ran, how: 'ran' };
+    current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
     try { st.writeState(current); } catch (e) { /* the status line just misses one update */ }
   }
   if (peakPct() < FAST_PATH_PCT) return null;

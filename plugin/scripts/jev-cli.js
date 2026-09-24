@@ -21,6 +21,7 @@ const onOff = (b) => (b ? 'on' : 'off');
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
+  report,
 };
 
 (async () => {
@@ -84,6 +85,12 @@ async function status() {
     `Jev cost so far: $${state.cost.toFixed(6)}`,
   ]);
   if (state.lastSilent) console.log(`Last silent: ${state.lastSilent.reason} (${state.lastSilent.at})`);
+  const project = st.readProjectConfig(st.projectDir(process.cwd()));
+  if (project) {
+    console.log(project.error
+      ? `Project config: ${project.path} is not usable (${project.error}); sizing is off here until it is fixed.`
+      : `Project config: ${project.path}: sizing ${project.router ? 'on' : 'off'}${project.prefer ? `, prefer ${project.prefer}` : ''}`);
+  }
 
   console.log(`Codex: ${available ? 'available' : 'not available (needs the codex plugin enabled and the codex CLI on PATH)'}`);
   if (available) {
@@ -110,6 +117,37 @@ async function status() {
     const found = updates.readCache();
     console.log(`Updates: ${found ? `${found.updates.length} available, checked ${new Date(found.checkedAt).toLocaleString()}` : 'not checked yet'}`);
   }
+}
+
+// What the router did and what it saved: notes given vs hand-offs that ran,
+// and the tokens the helper subagents used per model.
+async function report() {
+  const s = state.stats;
+  const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+  const calls = s.tiny + s.everyday + s.large + s.hardest + s.unsure;
+  print([
+    `Jev calls: ${calls}, cost $${state.cost.toFixed(6)}${calls > 0 ? ` ($${(state.cost / calls).toFixed(6)} each)` : ''}`,
+    'Hand-offs (notes given / runs):',
+    `  Claude helpers:   ${s.helper} / ${s.helperRuns}`,
+    `  Codex:            ${s.codex} / ${s.codexRuns}`,
+    `  "+" overrides:    ${s.forced}`,
+    `  notes suppressed (no gain): ${s.suppressed}`,
+    `Topic shifts flagged: ${s.shift}`,
+  ]);
+  const families = Object.keys(state.helperTokens);
+  if (families.length === 0) {
+    console.log('Helper subagent tokens: none recorded yet.');
+  } else {
+    console.log('Helper subagent tokens (from their transcripts):');
+    for (const f of families) {
+      const t = state.helperTokens[f];
+      console.log(`  ${f.padEnd(7)} ${String(t.runs).padStart(4)} runs   input ${fmt(t.input)}, cache write ${fmt(t.cacheWrite)}, cache read ${fmt(t.cacheRead)}, output ${fmt(t.output)}`);
+    }
+  }
+  print([
+    'Runs count every mynameisjev:* subagent and Codex task, including ones started without a Jev note.',
+    'Codex tasks bill your ChatGPT plan, so their tokens are not counted here.',
+  ]);
 }
 
 function fmtWindow(label, pct, resetsAt) {

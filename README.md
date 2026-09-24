@@ -157,6 +157,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | --- | --- |
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
+| `/mynameisjev:report` | Notes given vs hand-offs that ran, and helper subagent token use per model |
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
 | `/mynameisjev:prefer` | `codex` routes work to Codex first at any Claude usage; `claude` (default) goes back |
@@ -180,6 +181,21 @@ adds a note to Claude's context, or stays silent:
 | Same model, lots of intermediate output | "keeps bulky output out of your context" |
 | Self-contained coding, Codex under 85% | route to Codex |
 | Claude plan at 80% or more, Codex has headroom | route self-contained work to Codex; for work that needs the conversation, hand its self-contained steps to Codex |
+
+### Overrides
+
+Start a message with one of these to route it yourself. No Jev call is made,
+so they also work without an API key and in projects with sizing off.
+
+| Prefix | Routes to |
+| --- | --- |
+| `+tiny`, `+everyday`, `+large`, `+hardest` | That Claude helper subagent |
+| `+codex`, `+codex:<size>` | Codex, with the model for that size (default `everyday`) |
+| `+claude` | The session's own model, no hand-off |
+
+Example: `+large research state management options and write a report`.
+Claude sees the prefix and is told it is a routing instruction. `!` is not
+used because a leading `!` runs a shell command in Claude Code.
 
 Codex tasks run through the Codex plugin's own script with one Bash call, not
 through its `codex:codex-rescue` agent, which itself runs on Claude.
@@ -232,6 +248,38 @@ your `~/.claude/CLAUDE.md`:
   subagent, do so without asking. Do the work inline only when I ask you to.
 ```
 
+## Per-project settings
+
+A `.claude/mynameisjev.json` file in a project overrides the global settings
+there:
+
+```json
+{ "router": false, "prefer": "codex" }
+```
+
+| Key | Effect |
+| --- | --- |
+| `router` | `false` stops sizing in this project: no message text is sent. Limit notices and `+` overrides still work |
+| `prefer` | `"codex"` or `"claude"`, overriding `/mynameisjev:prefer` in this project |
+
+If the file can't be read or has an invalid value, Jev tells you once per
+session and does not size messages in that project until it is fixed. The
+status line shows `off in project` or `project config error`, and
+`/mynameisjev:status` shows the file in use.
+
+## Report
+
+`/mynameisjev:report` shows:
+
+- Jev calls and their cost
+- Claude helper and Codex notes given, next to the hand-offs that ran (runs
+  include hand-offs Claude started without a note)
+- `+` overrides used, and notes suppressed because a hand-off would not pay off
+- tokens used by `mynameisjev:*` subagents per model (input, cache write,
+  cache read, output), read from their transcripts when they finish
+
+Codex tasks bill your ChatGPT plan, so their tokens are not counted.
+
 ## Optional features
 
 All off by default, because each one changes things outside the plugin.
@@ -273,7 +321,14 @@ The generated `AGENTS.md`:
 
 - With the router on, the text of each message you send (and, for topic-shift
   detection, the first 1,000 characters of your previous message) goes to
-  OpenRouter and TypeSafe. `/mynameisjev:off` stops it.
+  OpenRouter and TypeSafe. `/mynameisjev:off` stops it everywhere;
+  `"router": false` in a project's `.claude/mynameisjev.json` stops it there.
+- Likely secrets are replaced with `[REDACTED]` first: common API key and
+  token formats (OpenAI, Anthropic, OpenRouter, GitHub, AWS, Slack, Google,
+  Stripe, JWTs, bearer tokens), private key blocks, credentials in URLs, and
+  values assigned to names like `API_KEY`, `password` or `client_secret`.
+  This is pattern matching, so a secret in an unusual format can still get
+  through; turn sizing off for projects where that matters.
 - The previous message is kept locally in `~/.claude/mynameisjev/state.json`.
 - Nothing else leaves your machine except the calls the optional features
   make (GitHub release checks, marketplace refreshes, Codex).

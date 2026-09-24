@@ -109,19 +109,26 @@ function resetSuffix(epochSec, withDay) {
 // Whether the router is on and its OpenRouter access works. "Works" comes from
 // the outcome of the router's last Jev call (state.lastCall), so rendering
 // never calls the API. Returns '' when the Jev state can't be read.
-function jevSegment() {
+// projectDir is checked for a .claude/mynameisjev.json override.
+function jevSegment(projectDir) {
   let state;
+  let project;
   try {
-    state = require('./jev-state').readState();
+    const st = require('./jev-state');
+    state = st.readState();
+    project = st.readProjectConfig(projectDir);
   } catch (_) {
     return '';
   }
   const label = cyan(bold('JEV'));
   if (!state.enabled) return `${label} ${mutedGray('off')}`;
+  if (project && project.error) return `${label} ${red('project config error')}`;
+  const prefer = (project && project.prefer) || state.prefer;
+  // Prefer-Codex mode is a standing choice, so it stays visible.
+  const route = (prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(state.route);
+  if (project && !project.router) return `${label} ${mutedGray('off in project')}${route}`;
   if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
   const last = state.lastCall;
-  // Prefer-Codex mode is a standing choice, so it stays visible.
-  const route = (state.prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(state.route);
   if (!last) return `${label} ${amber('on')}${route}`;
   if (!last.ok) return `${label} ${red(String(last.error || 'error').slice(0, 24))}${route}`;
   return `${label} ${green('✓')}${route}`;
@@ -479,7 +486,7 @@ process.stdin.on('end', () => {
     const leftParts = [
       acctPart,
       softBlue(model) + effort,
-      jevSegment() || null,
+      jevSegment(data.workspace?.project_dir || dir) || null,
       task ? bold(yellow(task)) : null,
     ].filter(Boolean).join(sep);
 

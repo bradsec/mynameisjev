@@ -42,6 +42,21 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^mynameisjev:",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-subagent-stop.js"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

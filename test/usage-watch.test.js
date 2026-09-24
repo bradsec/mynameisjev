@@ -95,3 +95,13 @@ test('with Codex: hands off steps at 80%, auto-transfers at 90%', async () => {
   assert.strictEqual(state.lastTransfer.threadId, 't-1');
   assert.deepStrictEqual(fs.readdirSync(path.join(claudeDir, 'projects', 'jev-transfers')), [], 'transcript copy removed');
 });
+
+test('counts hand-off runs per target', async () => {
+  setState({});
+  setUsage(10);
+  await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task "x"' } });
+  await watcher.watch({ tool_name: 'Agent', tool_input: { subagent_type: 'mynameisjev:large', prompt: 'x' } });
+  await watcher.watch({ tool_name: 'Agent', tool_input: { subagent_type: 'Explore', prompt: 'x' } });
+  const stats = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).stats;
+  assert.deepStrictEqual([stats.codexRuns, stats.helperRuns], [1, 1]);
+});

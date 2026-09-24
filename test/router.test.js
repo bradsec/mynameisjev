@@ -148,3 +148,39 @@ test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () =
   assert.match(router.routeAdvice('tiny', result({ size: 'tiny' }), ctx({ codexNow: codexOk, preferCodex: true })).suppress, /hand-off costs more/);
   assert.strictEqual(router.routeAdvice('everyday', result(), ctx({ codexNow: codexBusy, preferCodex: true })).codex, false);
 });
+
+test('override: parses "+" prefixes, not look-alikes', () => {
+  assert.deepStrictEqual(router.parseOverride('+large build the parser'), { target: 'tier', tier: 'large', token: '+large' });
+  assert.deepStrictEqual(router.parseOverride('+codex fix it'), { target: 'codex', tier: 'everyday', token: '+codex' });
+  assert.deepStrictEqual(router.parseOverride('+CODEX:hardest redesign'), { target: 'codex', tier: 'hardest', token: '+CODEX:hardest' });
+  assert.deepStrictEqual(router.parseOverride('+claude'), { target: 'claude', tier: null, token: '+claude' });
+  assert.strictEqual(router.parseOverride('+larger plan'), null);
+  assert.strictEqual(router.parseOverride('!codex fix it'), null);
+  assert.strictEqual(router.parseOverride('use +codex here'), null);
+});
+
+test('override: tier and claude notes', () => {
+  const tier = router.overrideAdvice(router.parseOverride('+tiny rename x'), ctx());
+  assert.match(tier.note, /"mynameisjev:tiny" subagent \(haiku\)\. Delegate it without asking/);
+  assert.deepStrictEqual(tier.route, ['claude', 'haiku', 'suggested']);
+  const here = router.overrideAdvice(router.parseOverride('+claude do it'), ctx());
+  assert.match(here.note, /Handle this message here/);
+  assert.deepStrictEqual(here.route, ['claude', 'opus', 'session']);
+});
+
+test('override: codex routes with the asked size, even when Codex looks busy', () => {
+  const r = router.overrideAdvice(router.parseOverride('+codex:tiny x'), ctx({ codexNow: codexOk }));
+  assert.match(r.note, /task --model gpt-6-luna --effort low/);
+  assert.deepStrictEqual(r.route, ['codex', 'gpt-6-luna', 'suggested']);
+  assert.strictEqual(r.notice, null);
+  const busy = router.overrideAdvice(router.parseOverride('+codex x'), ctx({ codexNow: codexBusy }));
+  assert.match(busy.note, /Route it to Codex/);
+  assert.match(busy.notice, /near its limit/);
+});
+
+test('override: codex falls back to Claude when unavailable', () => {
+  const r = router.overrideAdvice(router.parseOverride('+codex x'), ctx());
+  assert.match(r.note, /Codex is not available, so handle it here/);
+  assert.match(r.notice, /"\+codex" ignored/);
+  assert.strictEqual(r.route[0], 'claude');
+});

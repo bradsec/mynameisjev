@@ -28,7 +28,13 @@ const DEFAULT_STATE = {
   stats: {
     tiny: 0, everyday: 0, large: 0, hardest: 0, unsure: 0, skipped: 0, failed: 0,
     shift: 0, suppressed: 0, codex: 0, transfers: 0,
+    // Claude helper notes given, "+" overrides used, and hand-offs that ran
+    // (counted by jev-usage-watch.js) per target.
+    helper: 0, forced: 0, helperRuns: 0, codexRuns: 0,
   },
+  // Token use of mynameisjev:* subagents per model, from their transcripts
+  // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
+  helperTokens: {},
   cost: 0,
   lastSilent: null,
   // Outcome of the most recent Jev API call, shown by the status line:
@@ -36,6 +42,8 @@ const DEFAULT_STATE = {
   lastCall: null,
   // Previous prompt of the current session, for topic-shift detection.
   lastPrompt: null,
+  // Session and path of the last unusable project config announced.
+  projectNotice: null,
   // Last Claude usage notice shown, so each threshold crossing shows once.
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
@@ -75,9 +83,10 @@ function readState() {
       ...parsed,
       stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
       codexTiers: { ...(parsed.codexTiers || {}) },
+      helperTokens: { ...(parsed.helperTokens || {}) },
     };
   } catch (e) {
-    return { ...DEFAULT_STATE, stats: { ...DEFAULT_STATE.stats }, codexTiers: {} };
+    return { ...DEFAULT_STATE, stats: { ...DEFAULT_STATE.stats }, codexTiers: {}, helperTokens: {} };
   }
 }
 
@@ -85,4 +94,46 @@ function writeState(state) {
   fs.writeFileSync(dataFile('state.json'), JSON.stringify(state, null, 2));
 }
 
-module.exports = { PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, DEFAULT_STATE, readState, writeState };
+// Per-project overrides in <project>/.claude/mynameisjev.json:
+//   { "router": false }     never send this project's messages to Jev
+//   { "prefer": "codex" }   or "claude": overrides /mynameisjev:prefer here
+// Returns null when the file is absent, else { path, router, prefer, error }.
+// A file that can't be read or parsed sets `error` and router: false, so a
+// broken privacy opt-out fails closed instead of sending text.
+const PROJECT_CONFIG = path.join('.claude', 'mynameisjev.json');
+
+function readProjectConfig(dir) {
+  if (!dir) return null;
+  const file = path.join(dir, PROJECT_CONFIG);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return null;
+    return { path: file, router: false, prefer: null, error: e.message };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { path: file, router: false, prefer: null, error: `invalid JSON: ${e.message}` };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { path: file, router: false, prefer: null, error: 'expected a JSON object' };
+  }
+  const problems = [];
+  if (parsed.router !== undefined && typeof parsed.router !== 'boolean') problems.push('"router" must be true or false');
+  if (parsed.prefer !== undefined && parsed.prefer !== 'codex' && parsed.prefer !== 'claude') problems.push('"prefer" must be "codex" or "claude"');
+  if (problems.length > 0) return { path: file, router: false, prefer: null, error: problems.join('; ') };
+  return { path: file, router: parsed.router !== false, prefer: parsed.prefer || null, error: null };
+}
+
+// The project directory a hook or command runs for.
+function projectDir(fallback) {
+  return process.env.CLAUDE_PROJECT_DIR || fallback || null;
+}
+
+module.exports = {
+  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, DEFAULT_STATE, readState, writeState,
+  PROJECT_CONFIG, readProjectConfig, projectDir,
+};

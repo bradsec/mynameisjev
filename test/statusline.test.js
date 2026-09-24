@@ -12,12 +12,12 @@ fs.mkdirSync(path.join(claudeDir, 'mynameisjev'), { recursive: true });
 
 // Render the status line with a given router state and key, returning line 1
 // without colors.
-function line1(state, key) {
+function line1(state, key, input = '{"model":{"display_name":"Opus 5.5"}}') {
   fs.writeFileSync(path.join(claudeDir, 'mynameisjev', 'state.json'), JSON.stringify(state));
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex') };
   delete env.OPENROUTER_API_KEY;
   if (key) env.OPENROUTER_API_KEY = key;
-  const out = execFileSync(process.execPath, [script], { input: '{"model":{"display_name":"Opus 5.5"}}', env, cwd: tmp }).toString();
+  const out = execFileSync(process.execPath, [script], { input, env, cwd: tmp }).toString();
   return out.split('\n')[0].replace(/\x1b\[[0-9;]*m/g, '');
 }
 
@@ -58,4 +58,17 @@ test('route: hidden after 30 minutes', () => {
 test('prefer codex mode is marked', () => {
   assert.match(line1({ enabled: true, lastCall: { ok: true }, prefer: 'codex' }, 'k'), /JEV ✓ codex-first/);
   assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true } }, 'k'), /codex-first/);
+});
+
+test('project config: sizing off, prefer codex, and errors', () => {
+  const project = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  const cfg = path.join(project, '.claude', 'mynameisjev.json');
+  const input = JSON.stringify({ model: { display_name: 'Opus 5.5' }, workspace: { current_dir: project, project_dir: project } });
+  fs.writeFileSync(cfg, '{"router": false, "prefer": "codex"}');
+  assert.match(line1({ enabled: true }, 'sk-test', input), /JEV off in project codex-first/);
+  fs.writeFileSync(cfg, '{"prefer": "codex"}');
+  assert.match(line1({ enabled: true }, 'sk-test', input), /JEV on codex-first/);
+  fs.writeFileSync(cfg, 'nope');
+  assert.match(line1({ enabled: true }, 'sk-test', input), /JEV project config error/);
 });
