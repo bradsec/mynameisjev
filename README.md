@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/bradsec/mynameisjev/actions/workflows/ci.yml/badge.svg)](https://github.com/bradsec/mynameisjev/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="mynameisjev.png" alt="My Name is JEV" />
+</p>
+
 A Claude Code plugin that sizes every message you send and tells Claude when
 a cheaper model, a stronger one, or Codex would handle it better.
 
