@@ -17,9 +17,9 @@ const fs = require('fs');
 const path = require('path');
 const st = require('./jev-state');
 
-// Mirrors CLAUDE_ROUTE_PCT in jev-router.js for the fast path; the router's
-// THRESHOLDS decide everything past it.
-const FAST_PATH_PCT = 80;
+// Below this no threshold or pace can apply (jev-pace.js PACE_ROUTE_MIN_PCT),
+// so the fast path exits before loading the router, which decides the rest.
+const FAST_PATH_PCT = require('./jev-pace').PACE_ROUTE_MIN_PCT;
 
 function peakPct() {
   try {
@@ -34,7 +34,10 @@ function peakPct() {
 }
 
 // Helper agents and the Claude model each is pinned to (plugin/agents/*.md).
-const HELPER_MODELS = { 'mynameisjev:tiny': 'haiku', 'mynameisjev:everyday': 'sonnet', 'mynameisjev:large': 'opus' };
+const HELPER_MODELS = { 'mynameisjev:tiny': 'haiku', 'mynameisjev:everyday': 'sonnet', 'mynameisjev:large': 'opus', 'mynameisjev:hardest': 'opus' };
+
+// Subagent types that run on the session's model unless given one.
+const GENERAL_TYPES = new Set([undefined, null, '', 'general-purpose', 'claude']);
 
 // The hand-off this tool call performed, or null: { target, model }.
 function handOff(hookInput) {
@@ -46,6 +49,10 @@ function handOff(hookInput) {
   }
   if (hookInput.tool_name === 'Agent' && HELPER_MODELS[input.subagent_type]) {
     return { target: 'claude', model: HELPER_MODELS[input.subagent_type] };
+  }
+  // A general-purpose subagent on a helper model, as /mynameisjev:enforce sets.
+  if (hookInput.tool_name === 'Agent' && GENERAL_TYPES.has(input.subagent_type) && ['haiku', 'sonnet', 'opus'].includes(input.model)) {
+    return { target: 'claude', model: input.model };
   }
   return null;
 }
@@ -66,7 +73,7 @@ async function watch(hookInput) {
   const TH = r.THRESHOLDS;
   const state = r.readState();
   const claude = r.claudePeak();
-  if (!claude || claude.pct < TH.route) return null;
+  if (!r.claudeLow(claude)) return null;
   const cache = codex.readCache();
   codex.refreshInBackgroundIfStale(cache);
   const codexNow = r.codexStatus(cache);
@@ -81,7 +88,7 @@ async function watch(hookInput) {
 
   const pct = Math.round(claude.pct);
   const when = r.fmtReset(claude.resetsAt, claude.window === '7d');
-  const head = `Jev: Claude ${claude.window} usage reached ${pct}% during this turn (resets ${when}).`;
+  const head = `Jev: Claude ${claude.window} usage reached ${pct}% during this turn (resets ${when}).${r.paceText(claude)}`;
   const codexHead = codexNow.available ? `${head} ${codexNow.text}.` : head;
   const canHandOff = codexNow.ok && companion;
 
@@ -89,7 +96,7 @@ async function watch(hookInput) {
   let context;
   if (level === 'auto') {
     const t = await r.autoTransfer(hookInput.transcript_path, hookInput.session_id, hookInput.cwd);
-    r.recordTransfer(state, t);
+    r.recordTransfer(state, t, hookInput.session_id);
     notice = r.transferNotice(claude, codexNow, t);
     context = `${head} Claude is close to its limit and this session is copied into Codex. Stop after the current step and give a short summary of what is left.`;
   } else if (level === 'transfer') {

@@ -142,8 +142,9 @@ function sharePromptCache(session, pc) {
 }
 
 // Hooks never receive rate_limits, so share them with the Jev router
-// (jev-router.js) through a file. Written only when the numbers change,
-// since the status line re-runs on every update.
+// (jev-router.js) through a file, with a history of 5h samples for the pace
+// (jev-pace.js). Written only when the numbers change, since the status line
+// re-runs on every update. Returns what the file now holds.
 function shareLimits(fiveHour, sevenDay) {
   const pick = w => (Number.isFinite(w?.used_percentage)
     ? { used_percentage: w.used_percentage, resets_at: w.resets_at ?? null }
@@ -154,22 +155,30 @@ function shareLimits(fiveHour, sevenDay) {
   try { prev = JSON.parse(fs.readFileSync(limitsPath, 'utf8')); } catch (_) {}
   const unchanged = prev &&
     JSON.stringify([prev.five_hour, prev.seven_day]) === JSON.stringify([limits.five_hour, limits.seven_day]);
-  if (!unchanged) {
-    try { fs.writeFileSync(limitsPath, JSON.stringify({ at: Date.now(), ...limits })); } catch (_) {}
-  }
+  if (unchanged) return prev;
+  const now = Date.now();
+  const history = limits.five_hour && Number.isFinite(limits.five_hour.resets_at)
+    ? require('./jev-pace').recordSample(prev?.history, limits.five_hour, now)
+    : [];
+  const saved = { at: now, ...limits, history };
+  try { fs.writeFileSync(limitsPath, JSON.stringify(saved)); } catch (_) {}
+  return saved;
 }
 
 // Everything the Jev router needs from the status line payload. Runs in both
-// modes, before rendering, so a slow render can't lose it.
+// modes, before rendering, so a slow render can't lose it. Returns the saved
+// limits (for the pace shown next to the 5H bar), or null.
 function recordForJev(data) {
+  let limits = null;
   try {
     const fiveHour = data.rate_limits?.five_hour;
     const sevenDay = data.rate_limits?.seven_day;
-    if (fiveHour || sevenDay) shareLimits(fiveHour, sevenDay);
+    if (fiveHour || sevenDay) limits = shareLimits(fiveHour, sevenDay);
     if (data.session_id && data.prompt_cache?.caching_observed) sharePromptCache(data.session_id, data.prompt_cache);
   } catch (_) {
     // Never break the status line over the shared files.
   }
+  return limits;
 }
 
 // The cold-cache guard will block the next message (jev-router.js coldCache):
@@ -453,7 +462,7 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
-    recordForJev(data);
+    const limits = recordForJev(data);
     let state = null;
     try { state = require('./jev-state').readState(); } catch (_) {}
     if (runWrapped(input, data, state)) return;
@@ -539,6 +548,14 @@ process.stdin.on('end', () => {
     const windowPart = (label, w, withDay, segments, resets) => (Number.isFinite(w?.used_percentage)
       ? metricBar(label, Math.round(w.used_percentage), segments) + (resets ? resetSuffix(w.resets_at, withDay) : '')
       : '');
+    // At this pace the 5h window runs out before it resets: " →100% ~40m".
+    let paceNote = '';
+    try {
+      const p = require('./jev-pace').pace(limits, Date.now());
+      if (p?.beforeReset && p.minutesToFull !== null) {
+        paceNote = ` ${orange(`→100% ${require('./jev-pace').fmtMinutes(p.minutesToFull)}`)}`;
+      }
+    } catch (_) {}
 
     // ── Git info ───────────────────────────────────────────────────────────
     // repo identity comes from the payload when available, so skip the extra
@@ -604,7 +621,7 @@ process.stdin.on('end', () => {
         .filter(Boolean).join(sep);
       const rightParts = [
         ctxPart(bars ? 8 : 4),
-        windowPart('5H', fiveHour, false, bars ? 6 : 3, resets),
+        windowPart('5H', fiveHour, false, bars ? 6 : 3, resets) + (Number.isFinite(fiveHour?.used_percentage) ? paceNote : ''),
         windowPart('7D', sevenDay, true, bars ? 6 : 3, resets),
       ].filter(Boolean).join(dotSep);
       return rightParts ? leftParts + sep + rightParts : leftParts;

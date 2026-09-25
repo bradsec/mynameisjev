@@ -31,6 +31,10 @@ const DEFAULT_STATE = {
     // Claude helper notes given, "+" overrides used, and hand-offs that ran
     // (counted by jev-usage-watch.js) per target.
     helper: 0, forced: 0, helperRuns: 0, codexRuns: 0,
+    // Turns that ended because Claude hit its usage limit (jev-stop-failure.js).
+    limitHits: 0,
+    // Subagent calls whose model jev-agent-model.js set.
+    enforced: 0,
   },
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
@@ -50,6 +54,9 @@ const DEFAULT_STATE = {
   // context (`/mynameisjev:coldguard on`), once per expiry (coldGuardKey).
   coldGuard: false,
   coldGuardKey: null,
+  // Set the model of general-purpose subagents to the Claude helper Jev
+  // suggested for the message (`/mynameisjev:enforce on`).
+  enforce: false,
   // Last Claude usage notice shown, so each threshold crossing shows once.
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).

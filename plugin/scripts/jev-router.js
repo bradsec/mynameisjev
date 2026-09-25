@@ -39,6 +39,7 @@ const caveman = require('./jev-caveman');
 const sync = require('./jev-sync');
 const updates = require('./jev-updates');
 const { redact } = require('./jev-redact');
+const jevPace = require('./jev-pace');
 
 // Written by the jev-model-switch PostModelSwitch hook.
 const modelsPath = path.join(st.dataDir, 'session-models.json');
@@ -100,13 +101,17 @@ function recordSilent(state, counter, reason) {
 }
 
 // Tier -> the plugin's pinned helper agent (agents/*.md, namespaced by the
-// plugin as mynameisjev:<name>) and its model. Hardest shares the opus helper.
+// plugin as mynameisjev:<name>), its model and its reasoning effort. Large
+// and hardest share a model and differ in effort; Haiku takes no effort.
 const TIER_INFO = {
-  tiny: { agent: 'mynameisjev:tiny', model: 'haiku' },
-  everyday: { agent: 'mynameisjev:everyday', model: 'sonnet' },
-  large: { agent: 'mynameisjev:large', model: 'opus' },
-  hardest: { agent: 'mynameisjev:large', model: 'opus' },
+  tiny: { agent: 'mynameisjev:tiny', model: 'haiku', effort: null },
+  everyday: { agent: 'mynameisjev:everyday', model: 'sonnet', effort: 'medium' },
+  large: { agent: 'mynameisjev:large', model: 'opus', effort: 'high' },
+  hardest: { agent: 'mynameisjev:hardest', model: 'opus', effort: 'xhigh' },
 };
+
+// "opus, high effort" or "haiku".
+const helperLabel = (info) => `${info.model}${info.effort ? `, ${info.effort} effort` : ''}`;
 
 // Cost/capability order of model families.
 const MODEL_RANK = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
@@ -180,15 +185,15 @@ function delegationAdvice(tier, result, sessionFamily) {
   if (tier === 'tiny' && !heavy) return { suppress: 'tiny: subagent start-up costs more than it saves' };
 
   if (!sessionFamily) {
-    return `${head} Session model unknown. If this is self-contained work, consider delegating it to the "${info.agent}" subagent (${info.model}).`;
+    return `${head} Session model unknown. If this is self-contained work, consider delegating it to the "${info.agent}" subagent (${helperLabel(info)}).`;
   }
   const agentRank = MODEL_RANK[info.model];
   const sessionRank = MODEL_RANK[sessionFamily];
   if (agentRank < sessionRank) {
-    return `${head} The "${info.agent}" subagent (${info.model}) is cheaper than this session's ${sessionFamily} and fits the job; consider delegating it.`;
+    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is cheaper than this session's ${sessionFamily} and fits the job; consider delegating it.`;
   }
   if (agentRank > sessionRank) {
-    return `${head} The "${info.agent}" subagent (${info.model}) is stronger than this session's ${sessionFamily}; delegate it if quality matters more than cost.`;
+    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is stronger than this session's ${sessionFamily}; delegate it if quality matters more than cost.`;
   }
   if (heavy) {
     return `${head} "${info.agent}" runs the same model as this session (${sessionFamily}), so it saves no cost, but delegating keeps this task's bulky intermediate output out of the main context.`;
@@ -245,7 +250,9 @@ function modelStreak(streak, sessionId, sessionFamily, tier) {
 }
 
 // Highest Claude plan usage across the 5h and 7d windows, as saved by the
-// status line, or null when unknown (API-key sessions have no plan limits).
+// status line, or null when unknown (API-key sessions have no plan limits):
+// { pct, window, resetsAt, fivePct, pace } with the 5h window's usage and
+// pace (jev-pace.js) alongside.
 function claudePeak() {
   let saved;
   try {
@@ -261,7 +268,26 @@ function claudePeak() {
     const pct = Number.isFinite(w.resets_at) && w.resets_at < nowSec ? 0 : w.used_percentage;
     if (!peak || pct > peak.pct) peak = { pct, window: name, resetsAt: w.resets_at };
   }
+  if (peak) {
+    const five = saved.five_hour;
+    peak.fivePct = five && Number.isFinite(five.used_percentage) && !(Number.isFinite(five.resets_at) && five.resets_at < nowSec)
+      ? five.used_percentage : 0;
+    peak.pace = jevPace.pace(saved, Date.now());
+  }
   return peak;
+}
+
+// Whether work should move to Codex: usage past CLAUDE_ROUTE_PCT, or a 5h
+// pace that reaches 100% before the reset (jev-pace.js paceRoutes).
+function claudeLow(claude) {
+  return !!claude && (claude.pct >= CLAUDE_ROUTE_PCT || jevPace.paceRoutes(claude.fivePct, claude.pace));
+}
+
+// " At this pace the 5h limit is reached in ~40m, before the reset." or ''.
+function paceText(claude) {
+  const p = claude && claude.pace;
+  if (!p || !p.beforeReset || p.minutesToFull === null) return '';
+  return ` At this pace the 5h limit is reached in ${jevPace.fmtMinutes(p.minutesToFull)}, before the reset.`;
 }
 
 function fmtReset(epochSec, withDay) {
@@ -294,8 +320,10 @@ function codexStatus(cache) {
 // Where the current message is headed, for the status line: the session's
 // own Claude model, or a suggested Claude helper / Codex model.
 // jev-usage-watch.js upgrades a suggestion to how: 'ran' when it runs.
-function setRoute(state, target, model, how) {
-  state.route = { at: new Date().toISOString(), target, model: model || 'claude', how };
+// session scopes the hand-off enforcement (jev-agent-model.js) to the
+// conversation the suggestion was made in.
+function setRoute(state, target, model, how, session) {
+  state.route = { at: new Date().toISOString(), target, model: model || 'claude', how, session: session || null };
 }
 
 // Choose between Codex, a Claude helper, and no note. Codex takes
@@ -321,7 +349,7 @@ function routeAdvice(tier, result, ctx) {
     // cheaper done in place than handed off.
     if (tier === 'tiny' && !heavy) return { suppress: 'tiny: hand-off costs more than it saves' };
     const reason = ctx.claudeLow
-      ? `Claude ${ctx.claude.window} usage at ${Math.round(ctx.claude.pct)}%`
+      ? `Claude ${ctx.claude.window} usage at ${Math.round(ctx.claude.pct)}%${ctx.claude.pct < CLAUDE_ROUTE_PCT ? ', on pace to run out before the reset' : ''}`
       : ctx.preferCodex ? 'prefer-Codex mode is on'
         : 'self-contained coding task; Codex uses a separate quota';
     const choice = codex.tierChoice(tier, ctx.overrides, ctx.codexCache);
@@ -338,7 +366,7 @@ function routeAdvice(tier, result, ctx) {
 // mode.
 function subStepAdvice(claude, companion) {
   const why = claude
-    ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}). `
+    ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
   return why +
     'Keep coordination and decisions here, but hand each self-contained step (tests, file edits, searches, reviews, research) to Codex ' +
@@ -349,12 +377,12 @@ function subStepAdvice(claude, companion) {
 // User notice once Claude usage crosses a threshold, or null below it. The
 // key identifies window, reset and level so each crossing is announced once.
 function limitNoticeFor(claude, codexNow, autoTransferOn) {
-  if (!claude || claude.pct < CLAUDE_ROUTE_PCT) return null;
+  if (!claudeLow(claude)) return null;
   // With auto-transfer on, the per-prompt transfer notice takes over here.
   if (autoTransferOn && codexNow.available && claude.pct >= AUTO_TRANSFER_PCT) return null;
   const level = claude.pct >= CLAUDE_TRANSFER_PCT ? 'transfer' : 'route';
   const head = `Jev: Claude ${claude.window} usage at ${Math.round(claude.pct)}% ` +
-    `(resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).` +
+    `(resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)}` +
     (codexNow.available ? ` ${codexNow.text}.` : '');
   let text = head;
   if (level === 'transfer') {
@@ -410,11 +438,12 @@ function autoTransfer(transcriptPath, sessionId, cwd) {
   });
 }
 
-// Count a finished transfer and remember its thread for the status line.
-function recordTransfer(state, t) {
+// Count a finished transfer and remember its thread (and session) for the
+// status line and jev-stop-failure.js.
+function recordTransfer(state, t, session) {
   if (!t.threadId) return;
   state.stats.transfers += 1;
-  state.lastTransfer = { at: new Date().toISOString(), threadId: t.threadId };
+  state.lastTransfer = { at: new Date().toISOString(), threadId: t.threadId, session: session || null };
   writeState(state);
 }
 
@@ -472,7 +501,7 @@ function overrideAdvice(o, ctx) {
   if (o.target === 'tier') {
     const info = TIER_INFO[o.tier];
     return {
-      note: `${prefix}The user wants it done by the "${info.agent}" subagent (${info.model}). Delegate it without asking, ` +
+      note: `${prefix}The user wants it done by the "${info.agent}" subagent (${helperLabel(info)}). Delegate it without asking, ` +
         'with a self-contained prompt that carries any context it needs from this conversation.',
       route: ['claude', info.model, 'suggested'],
     };
@@ -597,7 +626,7 @@ module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
   routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice,
   coldCache, coldGuardReason, modelStreak,
-  claudePeak, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
+  claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
 
@@ -614,11 +643,12 @@ function main() {
     const output = {};
     const notices = [];
     let transfer = null;
+    // Declared here so the transfer record in `finally` can name the session.
+    let sessionId = null;
     let claude = null;
     let codexNow = null;
     try {
       let prompt;
-      let sessionId;
       let transcriptPath;
       let cwd;
       try {
@@ -654,7 +684,7 @@ function main() {
       if (state.autoTransfer && codexNow.available && claude && claude.pct >= AUTO_TRANSFER_PCT && transcriptPath) {
         transfer = autoTransfer(transcriptPath, sessionId, cwd);
       }
-      const claudeLow = !!claude && claude.pct >= CLAUDE_ROUTE_PCT;
+      const isLow = claudeLow(claude);
       const limitNotice = limitNoticeFor(claude, codexNow, state.autoTransfer);
       // Once per window, reset and level, so the notice doesn't repeat on every prompt.
       if (limitNotice && state.limitNotice !== limitNotice.key) {
@@ -708,7 +738,7 @@ function main() {
       // Every message runs on the session model unless a note below says
       // otherwise.
       const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
-      setRoute(state, 'claude', sessionFamily, 'session');
+      setRoute(state, 'claude', sessionFamily, 'session', sessionId);
 
       const project = st.readProjectConfig(st.projectDir(cwd));
       if (project && project.error && state.projectNotice !== `${sessionId}:${project.path}`) {
@@ -723,7 +753,7 @@ function main() {
       if (override) {
         const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers });
         state.stats.forced += 1;
-        setRoute(state, ...o.route);
+        setRoute(state, ...o.route, sessionId);
         state.lastSilent = null;
         writeState(state);
         if (o.notice) notices.push(o.notice);
@@ -785,10 +815,10 @@ function main() {
         // Unsized work still runs on Claude; with Claude low, point its
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();
-        if ((claudeLow || prefer === 'codex') && codexNow.ok && companion) {
-          setRoute(state, 'codex', 'steps', 'suggested');
+        if ((isLow || prefer === 'codex') && codexNow.ok && companion) {
+          setRoute(state, 'codex', 'steps', 'suggested', sessionId);
           writeState(state);
-          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(claudeLow ? claude : null, companion) };
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion) };
         }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
@@ -800,7 +830,7 @@ function main() {
         const advice = routeAdvice(tier, result, {
           sessionFamily,
           claude,
-          claudeLow,
+          claudeLow: isLow,
           preferCodex: prefer === 'codex',
           codexNow,
           codexCache,
@@ -809,7 +839,7 @@ function main() {
         if (advice.note) {
           if (advice.codex) state.stats.codex += 1;
           else state.stats.helper += 1;
-          setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested');
+          setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested', sessionId);
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };
         } else {
@@ -822,7 +852,7 @@ function main() {
     } finally {
       if (transfer) {
         const t = await transfer;
-        recordTransfer(state, t);
+        recordTransfer(state, t, sessionId);
         notices.unshift(transferNotice(claude, codexNow, t));
       }
       if (notices.length > 0) output.systemMessage = notices.join('\n');

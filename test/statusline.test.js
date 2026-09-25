@@ -200,3 +200,14 @@ test('wrap --with-jev adds the JEV segment on its own line', () => {
   const out = plain(render({ enabled: true, statusLineMode: 'wrap', statusLineJev: true, previousStatusLine: { type: 'command', command: mine } }, busy));
   assert.strictEqual(out, 'MINE\nJEV on');
 });
+
+test('shows when the 5h window runs out at the current pace, and records history', () => {
+  const limits = path.join(claudeDir, 'mynameisjev', 'claude-limits.json');
+  const now = Date.now();
+  const reset = Math.floor(now / 1000) + 3 * 3600;
+  fs.writeFileSync(limits, JSON.stringify({ five_hour: { used_percentage: 50, resets_at: reset }, history: [{ at: now - 30 * 60000, pct: 50, reset }] }));
+  const out = plain(render({ enabled: true }, { model: { display_name: 'Opus 5.5' }, rate_limits: { five_hour: { used_percentage: 70, resets_at: reset } } }));
+  // 50% -> 70% in 30 minutes: 100% in about 45 minutes.
+  assert.match(out, /5H ████░░ 70% ↺ \d\d:\d\d →100% ~4\dm/);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(limits, 'utf8')).history.map((s) => s.pct), [50, 70]);
+});

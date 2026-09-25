@@ -1,11 +1,12 @@
 ---
 name: large
 description: >
-  Pinned to the strongest available model. Use for jobs Jev sized as LARGE
-  or HARDEST: multi-step builds, research, full reports, strategy, or
-  anything where a wrong call is expensive. Self-contained work only.
+  Pinned to the strongest available model at high effort. Use for jobs Jev
+  sized as LARGE: multi-step builds, research, or a full report.
+  Self-contained work only.
 tools: [Read, Edit, Write, Grep, Glob, Bash, WebFetch, WebSearch]
 model: opus
+effort: high
 ---
 
 Do the self-contained task you were given. Take the time the task actually

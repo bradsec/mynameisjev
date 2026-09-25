@@ -33,11 +33,32 @@ test('records hand-offs that ran, even below the usage thresholds', async () => 
   route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
   assert.strictEqual(route.model, 'haiku');
   assert.strictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'Explore' } }), null);
+  assert.deepStrictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', model: 'sonnet' } }), { target: 'claude', model: 'sonnet' });
+  assert.strictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose' } }), null);
+  assert.deepStrictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'mynameisjev:hardest' } }), { target: 'claude', model: 'opus' });
   assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
 });
 
-test('fast path threshold matches the router', () => {
-  assert.strictEqual(watcher.FAST_PATH_PCT, router.THRESHOLDS.route);
+test('fast path exits only below every threshold, including the pace', () => {
+  assert.strictEqual(watcher.FAST_PATH_PCT, require('../plugin/scripts/jev-pace').PACE_ROUTE_MIN_PCT);
+  assert.ok(watcher.FAST_PATH_PCT <= router.THRESHOLDS.route);
+});
+
+test('a fast pace moves work to Codex mid-turn below 80%', async () => {
+  setState({});
+  const now = Date.now();
+  const reset = Math.floor(now / 1000) + 3 * 3600;
+  // 50% to 70% in the last 30 minutes: 100% in ~45 minutes, well before the reset.
+  fs.writeFileSync(path.join(dataDir, 'claude-limits.json'), JSON.stringify({
+    at: now,
+    five_hour: { used_percentage: 70, resets_at: reset },
+    history: [
+      { at: now - 30 * 60000, pct: 50, reset },
+      { at: now - 1000, pct: 70, reset },
+    ],
+  }));
+  const out = await watcher.watch(hookInput);
+  assert.match(out.systemMessage, /usage reached 70% during this turn .*At this pace the 5h limit is reached in ~4\dm, before the reset\./);
 });
 
 test('quiet below 80% and when the router is off', async () => {

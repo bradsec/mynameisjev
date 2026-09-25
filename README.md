@@ -12,9 +12,12 @@ produce bulky output, is it coding, is it a new topic) and turns the answers
 into a short routing note for Claude. One Jev call costs about $0.00002.
 
 - **Model-aware delegation.** Knows which Claude model the session runs and
-  only suggests a helper (`mynameisjev:tiny` on Haiku, `:everyday` on Sonnet,
-  `:large` on Opus) when it is cheaper, stronger, or keeps bulky output out of
-  your main context. Tiny jobs and jobs that need the conversation stay put.
+  only suggests a helper (`mynameisjev:tiny` on Haiku, `:everyday` on Sonnet
+  at medium effort, `:large` on Opus at high effort, `:hardest` on Opus at
+  extra-high effort) when it is cheaper, stronger, or keeps bulky output out
+  of your main context. Tiny jobs and jobs that need the conversation stay
+  put. `/mynameisjev:enforce on` makes general-purpose subagents use the
+  suggested model.
 - **Topic-shift notices.** Tells you when a message starts an unrelated task,
   so you can `/clear` instead of paying for stale context.
   `/mynameisjev:handoff` saves a note of the old task first.
@@ -195,6 +198,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:status` | Stats, and the state of each feature |
 | `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
 | `/mynameisjev:coldguard` | Opt-in, see below |
+| `/mynameisjev:enforce` | Opt-in, see below |
 | `/mynameisjev:report` | Notes given vs hand-offs that ran, and helper subagent token use per model |
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
@@ -297,6 +301,7 @@ Claude plan usage thresholds, each announced once per usage window:
 
 | Usage | What happens |
 | --- | --- |
+| 60% and on pace to run out | Work moves to Codex when available, if the 5h usage pace reaches 100% before the reset within 90 minutes |
 | 80% | Work moves to Codex when available |
 | 85% | Warning; Claude wraps up; `/codex:transfer` suggested when Codex is available |
 | 90% | With auto-transfer on, the session is copied into Codex and the `codex resume` command is shown (and kept on the status line) |
@@ -306,6 +311,20 @@ of a 5-hour window, and at 100% Claude can't act at all, not even to hand work
 over. For the same reason usage is also checked after every tool call, not
 only when you send a message, so a long turn that crosses a threshold is
 caught mid-turn.
+
+The pace is the rise in 5h usage over the last hour of samples, which the
+status line records each time the percentage changes. It needs at least 10
+minutes of samples, and it measures working time: an idle break doesn't
+lower it. The status line shows `→100% ~40m` next to the 5H bar when the
+window would run out before its reset.
+
+If a turn still ends because Claude hit its limit, Jev sends a desktop
+notification (Claude Code shows no hook messages at that point). With
+auto-transfer on and Codex available, it first copies the session into
+Codex, and the notification and the status line's Codex line show the
+`codex resume` command. A retry within 5 minutes reuses that copy. The
+notification uses OSC 9 in iTerm2, WezTerm, Windows Terminal and ConEmu,
+OSC 99 in Kitty, and OSC 777 elsewhere (Ghostty, Warp, urxvt).
 
 Notes are suggestions. To make Claude follow them without asking, add this to
 your `~/.claude/CLAUDE.md`:
@@ -356,6 +375,7 @@ All off by default, because each one changes things outside the plugin.
 | --- | --- | --- |
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
 | Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
+| Enforce hand-offs | `/mynameisjev:enforce on` | When Jev suggested a Claude helper for the message, a general-purpose subagent that Claude starts without choosing a model runs on that helper's model (effort can't be set this way; the `mynameisjev:*` helpers carry theirs). Named agents, calls that choose a model, Codex routes and other sessions are left alone, and permission prompts are unchanged |
 | Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
 | Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Jev's status line shows `guard armed` next to the cold cache when the next message would be blocked. Needs the status line, which records the cache state |
 | Update check | `/mynameisjev:update on` | Checks daily (in the background) for updates to third-party Claude plugins, the Codex CLI and RTK, and tells you. `/mynameisjev:update` applies them |

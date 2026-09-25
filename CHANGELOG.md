@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.7
+
+- Usage pace: the status line records 5h usage over time and shows
+  `→100% ~40m` when the window would run out before its reset. From 60%,
+  a pace that runs out within 90 minutes moves work to Codex early.
+- When a turn ends because Claude hit its usage limit, a `StopFailure`
+  hook sends a desktop notification. With auto-transfer on it first copies
+  the session into Codex and names the `codex resume` command.
+- New opt-in `/mynameisjev:enforce on`: general-purpose subagents that
+  Claude starts without a model run on the Claude helper model Jev
+  suggested for the message.
+- Helpers carry a reasoning effort: `everyday` medium, `large` high, and a
+  new `hardest` helper on Opus at extra-high effort (Haiku takes none).
+- `/mynameisjev:report` counts subagent models set by enforce and turns
+  that ended at the usage limit.
+
 ## 0.3.6
 
 - `/mynameisjev:statusline install` also saves your previous status line in

@@ -22,7 +22,7 @@ const onOff = (b) => (b ? 'on' : 'off');
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
-  report, coldguard: coldguardCommand, handoff: handoffPath,
+  report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
 };
 
 (async () => {
@@ -101,7 +101,7 @@ async function status() {
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
   }
 
-  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}`);
+  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}`);
   if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
   if (state.sync) {
     const rtk = sync.rtkStatus();
@@ -133,6 +133,8 @@ async function report() {
     `  Claude helpers:   ${s.helper} / ${s.helperRuns}`,
     `  Codex:            ${s.codex} / ${s.codexRuns}`,
     `  "+" overrides:    ${s.forced}`,
+    `  subagent models set by enforce: ${s.enforced}`,
+    `  turns ended at the usage limit: ${s.limitHits}`,
     `  notes suppressed (no gain): ${s.suppressed}`,
     `Topic shifts flagged: ${s.shift}`,
   ]);
@@ -255,6 +257,12 @@ async function preferCommand([arg]) {
   } else {
     console.log('Prefer: claude. Work goes to Codex only for self-contained coding tasks, or once Claude usage passes the routing threshold.');
   }
+}
+
+async function enforceCommand([arg]) {
+  if (toggle('enforce', 'Enforce hand-offs', arg)) return;
+  if (arg) throw new Error('usage: /mynameisjev:enforce [on | off]');
+  console.log(`Enforce hand-offs: ${onOff(state.enforce)}. When on and Jev suggested a Claude helper for the message, a general-purpose subagent Claude starts without choosing a model runs on that helper's model. usage: /mynameisjev:enforce [on | off]`);
 }
 
 async function coldguardCommand([arg]) {

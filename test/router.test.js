@@ -228,3 +228,21 @@ test('cold cache: only past expiry and over the size threshold', () => {
   assert.strictEqual(router.coldCache('unknown', 5000), null);
   assert.strictEqual(router.coldCache('missing', 5000), null);
 });
+
+test('claudeLow: past 80%, or a pace that runs out before the reset from 60%', () => {
+  assert.ok(router.claudeLow({ pct: 81, fivePct: 81, pace: null }));
+  assert.ok(!router.claudeLow({ pct: 70, fivePct: 70, pace: null }));
+  assert.ok(router.claudeLow({ pct: 70, fivePct: 70, pace: { beforeReset: true, minutesToFull: 30 } }));
+  assert.ok(!router.claudeLow({ pct: 70, fivePct: 70, pace: { beforeReset: false, minutesToFull: 30 } }));
+  assert.ok(!router.claudeLow(null));
+  const claude = { pct: 70, fivePct: 70, window: '5h', resetsAt: 0, pace: { beforeReset: true, minutesToFull: 30 } };
+  assert.match(router.limitNoticeFor(claude, codexOk, false).text, /At this pace the 5h limit is reached in ~30m, before the reset\. .*Routing self-contained work to Codex/);
+  const r = router.routeAdvice('everyday', result(), ctx({ codexNow: codexOk, claude, claudeLow: true }));
+  assert.match(r.note, /usage at 70%, on pace to run out before the reset/);
+});
+
+test('helpers carry their effort: hardest has its own xhigh helper', () => {
+  assert.match(router.delegationAdvice('hardest', result({ size: 'hardest' }), 'sonnet'), /"mynameisjev:hardest" subagent \(opus, xhigh effort\)/);
+  assert.match(router.delegationAdvice('everyday', result(), 'opus'), /\(sonnet, medium effort\)/);
+  assert.match(router.overrideAdvice(router.parseOverride('+large x'), ctx()).note, /"mynameisjev:large" subagent \(opus, high effort\)/);
+});
