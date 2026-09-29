@@ -132,6 +132,12 @@ test('transcript: newest main-thread reply wins, subagent and synthetic entries 
   assert.strictEqual(router.transcriptModel(path.join(tmp, 'missing.jsonl')), null);
 });
 
+test('transcript: Sonnet 5.5 model id maps to the sonnet family', () => {
+  const file = path.join(tmp, 's55.jsonl');
+  fs.writeFileSync(file, JSON.stringify({ type: 'assistant', timestamp: '2026-09-30T00:00:00Z', message: { model: 'claude-sonnet-5-5' } }));
+  assert.strictEqual(router.transcriptModel(file).family, 'sonnet');
+});
+
 test('prefer codex: self-contained work goes to Codex at low Claude usage', () => {
   const r = router.routeAdvice('everyday', result(), ctx({ codexNow: codexOk, preferCodex: true }));
   assert.strictEqual(r.codex, true);

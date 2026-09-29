@@ -18,7 +18,7 @@ test('adds up usage per model, once per reply', () => {
     JSON.stringify({ type: 'user', message: { content: 'x' } }),
     entry('m1', 'claude-sonnet-5', u(2, 100, 1000, 50)),
     entry('m1', 'claude-sonnet-5', u(2, 100, 1000, 50)),
-    entry('m2', 'claude-sonnet-5', u(1, 0, 1100, 20)),
+    entry('m2', 'claude-sonnet-5-5', u(1, 0, 1100, 20)),
     entry('m3', '<synthetic>', u(9, 9, 9, 9)),
     '{"cut off',
   ].join('\n');
