@@ -62,7 +62,8 @@ async function watch(hookInput) {
   if (!current.enabled) return null;
   const ran = handOff(hookInput);
   if (ran) {
-    current.route = { at: new Date().toISOString(), ...ran, how: 'ran' };
+    // session keeps the Codex edit guard (jev-codex-steps.js) on for this turn.
+    current.route = { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null };
     current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
     try { st.writeState(current); } catch (e) { /* the status line just misses one update */ }
   }
@@ -84,6 +85,9 @@ async function watch(hookInput) {
   const key = `${claude.window}:${claude.resetsAt}:${level}`;
   if (state.limitNotice === key) return null;
   state.limitNotice = key;
+  // Past a threshold mid-turn the rest of the turn is Codex steps, as the
+  // router would have routed it; this also arms the edit guard.
+  if (level !== 'auto' && codexNow.ok && companion) r.setRoute(state, 'codex', 'steps', 'suggested', hookInput.session_id);
   r.writeState(state);
 
   const pct = Math.round(claude.pct);

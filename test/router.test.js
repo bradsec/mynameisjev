@@ -89,7 +89,7 @@ test('route: with Claude low, work that needs the conversation gets a sub-step n
   const claude = { pct: 82, window: '5h', resetsAt: 0 };
   const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, claude, claudeLow: true }));
   assert.strictEqual(r.codex, true);
-  assert.match(r.note, /hand each self-contained step/);
+  assert.match(r.note, /Delegate without asking.*Do not make edits yourself/);
 });
 
 test('route: with Claude fine, work that needs the conversation stays quiet', () => {
@@ -147,7 +147,7 @@ test('prefer codex: self-contained work goes to Codex at low Claude usage', () =
 test('prefer codex: work that needs the conversation gets the sub-step note', () => {
   const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true }));
   assert.strictEqual(r.model, 'steps');
-  assert.match(r.note, /^Jev: prefer-Codex mode is on\. Keep coordination/);
+  assert.match(r.note, /^Jev: prefer-Codex mode is on\. Delegate without asking/);
 });
 
 test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () => {

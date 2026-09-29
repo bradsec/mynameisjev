@@ -26,9 +26,10 @@ const hookInput = { session_id: 's', cwd: home, transcript_path: path.join(claud
 test('records hand-offs that ran, even below the usage thresholds', async () => {
   setState({});
   setUsage(10);
-  await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task --model gpt-6-sol --effort medium "x"' } });
+  await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task --model gpt-6-sol --effort medium "x"' } });
   let route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
   assert.deepStrictEqual({ target: route.target, model: route.model, how: route.how }, { target: 'codex', model: 'gpt-6-sol', how: 'ran' });
+  assert.strictEqual(route.session, 's', 'keeps the session for the Codex edit guard');
   await watcher.watch({ tool_name: 'Agent', tool_input: { subagent_type: 'mynameisjev:tiny', prompt: 'x' } });
   route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
   assert.strictEqual(route.model, 'haiku');
@@ -107,6 +108,8 @@ test('with Codex: hands off steps at 80%, auto-transfers at 90%', async () => {
   const route = await watcher.watch(hookInput);
   assert.match(route.systemMessage, /hands self-contained steps to Codex/);
   assert.match(route.hookSpecificOutput.additionalContext, /codex-companion\.mjs" task/);
+  const stepsRoute = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
+  assert.deepStrictEqual([stepsRoute.target, stepsRoute.model, stepsRoute.how, stepsRoute.session], ['codex', 'steps', 'suggested', 's'], 'mid-turn crossing arms the edit guard');
 
   setUsage(91);
   const auto = await watcher.watch(hookInput);

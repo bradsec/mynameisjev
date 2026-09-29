@@ -117,6 +117,19 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "^(Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-codex-steps.js"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ]
   }

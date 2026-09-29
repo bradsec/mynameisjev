@@ -35,6 +35,8 @@ const DEFAULT_STATE = {
     limitHits: 0,
     // Subagent calls whose model jev-agent-model.js set.
     enforced: 0,
+    // Claude file edits jev-codex-steps.js denied while routed to Codex.
+    editsBlocked: 0,
   },
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.8
+
+- Codex steps hand-offs now happen. Near Claude's limit the note told
+  Claude to hand self-contained steps to Codex, but Claude often made the
+  edits itself, so Codex usage stayed flat and Claude hit its limit. The
+  note is now a directive ("Delegate without asking", no edits through
+  Edit/Write or Bash).
+- `/mynameisjev:enforce on` also denies Claude's own Edit, Write and
+  NotebookEdit calls while the message is routed to Codex, and gives the
+  Codex companion command instead. The guard holds for the rest of the turn
+  after a Codex task runs. Edits through Bash are not blocked.
+- A threshold crossed mid-turn now sets the `→ codex steps` route, so the
+  status line and the edit guard follow it.
+- `/mynameisjev:report` counts Claude edits sent to Codex.
+
 ## 0.3.7
 
 - Usage pace: the status line records 5h usage over time and shows

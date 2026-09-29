@@ -134,6 +134,7 @@ async function report() {
     `  Codex:            ${s.codex} / ${s.codexRuns}`,
     `  "+" overrides:    ${s.forced}`,
     `  subagent models set by enforce: ${s.enforced}`,
+    `  Claude edits sent to Codex by enforce: ${s.editsBlocked || 0}`,
     `  turns ended at the usage limit: ${s.limitHits}`,
     `  notes suppressed (no gain): ${s.suppressed}`,
     `Topic shifts flagged: ${s.shift}`,
@@ -262,7 +263,7 @@ async function preferCommand([arg]) {
 async function enforceCommand([arg]) {
   if (toggle('enforce', 'Enforce hand-offs', arg)) return;
   if (arg) throw new Error('usage: /mynameisjev:enforce [on | off]');
-  console.log(`Enforce hand-offs: ${onOff(state.enforce)}. When on and Jev suggested a Claude helper for the message, a general-purpose subagent Claude starts without choosing a model runs on that helper's model. usage: /mynameisjev:enforce [on | off]`);
+  console.log(`Enforce hand-offs: ${onOff(state.enforce)}. When on and Jev suggested a Claude helper for the message, a general-purpose subagent Claude starts without choosing a model runs on that helper's model. When the message is routed to Codex, Claude's own Edit/Write/NotebookEdit calls are denied and sent to Codex instead. usage: /mynameisjev:enforce [on | off]`);
 }
 
 async function coldguardCommand([arg]) {

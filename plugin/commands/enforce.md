@@ -1,5 +1,5 @@
 ---
-description: Make general-purpose subagents run on the Claude helper model Jev suggested
+description: Make Jev's hand-offs happen - helper models for subagents, Codex for edits on Codex routes
 argument-hint: [on | off]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true

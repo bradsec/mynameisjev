@@ -369,8 +369,9 @@ function subStepAdvice(claude, companion) {
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
   return why +
-    'Keep coordination and decisions here, but hand each self-contained step (tests, file edits, searches, reviews, research) to Codex ' +
+    'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search, review and research step to Codex ' +
     `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the step, with the context it needs>" (add --write if it should edit files). ` +
+    'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ' +
     'Keep your own replies short.';
 }
 
