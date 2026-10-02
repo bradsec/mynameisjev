@@ -243,7 +243,7 @@ test('handle blocks on an unrelated file even when every part is covered', async
   };
   const out = await check.handle(input({ cwd, transcript_path: editTranscript('Add a retry to the fetch helper.', cwd) }), { ask, env });
   assert.strictEqual(out.decision, 'block');
-  assert.match(out.reason, new RegExp(`- ${path.join('test', 'fetch.test.js').replace(/\\/g, '\\\\\\\\')}`));
+  assert.ok(out.reason.includes(`- ${path.join('test', 'fetch.test.js')}\n`), out.reason);
   assert.doesNotMatch(out.reason, /may not cover/);
   assert.match(out.systemMessage, /1 edited file/);
   assert.strictEqual(readState().stats.checkScope, 1);
