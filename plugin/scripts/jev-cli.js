@@ -23,7 +23,7 @@ const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
-  decide: decideCommand, check: checkCommand,
+  decide: decideCommand, check: checkCommand, compare: compareCommand,
 };
 
 (async () => {
@@ -291,19 +291,29 @@ async function handoffPath() {
   console.log(path.join(folder, `${name}-${stamp}.md`));
 }
 
-// Reads the decide input as JSON on stdin; the command passes it through a
-// quoted heredoc so the user's "|" and quotes never reach a shell. Exits 1
-// on failure so Claude sees the call failed.
-async function decideCommand() {
+// decide and compare read their input as JSON on stdin; the commands pass it
+// through a quoted heredoc so the user's "|", quotes and path case never go
+// through a shell or the lowercased argv. Exits 1 on failure so Claude sees
+// the call failed.
+async function stdinCommand(name, run) {
   try {
     const raw = fs.readFileSync(0, 'utf8');
     let input;
-    try { input = JSON.parse(raw); } catch (e) { throw new Error(`decide expects JSON on stdin (${e.message})`); }
-    print(await require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY));
+    try { input = JSON.parse(raw); } catch (e) { throw new Error(`${name} expects JSON on stdin (${e.message})`); }
+    print(await run(input));
   } catch (e) {
     process.exitCode = 1;
     throw e;
   }
+}
+
+async function decideCommand() {
+  await stdinCommand('decide', (input) => require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY));
+}
+
+async function compareCommand() {
+  const cwd = process.cwd();
+  await stdinCommand('compare', (input) => require('./jev-compare').compare(input, process.env.OPENROUTER_API_KEY, { root: st.projectDir(cwd), cwd }));
 }
 
 async function transferCommand([arg]) {

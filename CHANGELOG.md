@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.11
+
+- `/mynameisjev:compare`: Jev scores 2 to 4 code variants (project files,
+  line ranges, or versions Claude takes from the conversation) on up to 4
+  criteria, picks the best overall, and flags a toss-up. Files outside the
+  project are refused.
+
 ## 0.3.10
 
 - `/mynameisjev:check on` (opt-in): a Stop hook asks Jev whether Claude's

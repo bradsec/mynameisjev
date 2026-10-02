@@ -39,7 +39,8 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
   line when Codex is available.
 - **Quick decisions.** `/mynameisjev:decide` asks Jev to pick between
   options you type, or the ones the conversation is weighing, and shows the
-  probability of each. See [Decide](#decide).
+  probability of each. `/mynameisjev:compare` scores 2 to 4 code variants
+  on a few criteria. See [Decide](#decide) and [Compare](#compare).
 
 Everything else is opt-in (see [Optional features](#optional-features)).
 
@@ -204,6 +205,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
 | `/mynameisjev:decide [A \| B -- criteria]` | Jev picks between options; see [Decide](#decide) |
+| `/mynameisjev:compare [a.js b.js -- criteria]` | Jev scores code variants; see [Compare](#compare) |
 | `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
 | `/mynameisjev:check` | Opt-in, see below |
 | `/mynameisjev:coldguard` | Opt-in, see below |
@@ -243,6 +245,39 @@ within 0.15, a `Toss-up` line says either is defensible. Jev gives no
 reasons, so Claude adds one line marked **Claude's take**, its own opinion.
 Jev cannot run code or see files Claude does not send, so treat the pick as
 a cheap second opinion, not a verdict. Text only: Jev takes no images.
+
+## Compare
+
+`/mynameisjev:compare` asks Jev to score 2 to 4 code variants on up to 4
+criteria and pick the best overall:
+
+```text
+/mynameisjev:compare src/a.js src/b.js -- correctness risk, readability
+/mynameisjev:compare lib/x.js:10-40 lib/y.js:5-30
+/mynameisjev:compare
+```
+
+With arguments, each is a file, optionally with a `:start-end` line range,
+and anything after ` -- ` is a comma-separated list of criteria (default:
+correctness risk, readability, simplicity). Files must be inside the project,
+after following symlinks, and at most 6,000 characters each; use a line
+range for bigger files. With no arguments, Claude takes the variants the
+conversation is weighing, such as two versions of a function it proposed.
+
+```text
+                  a.js  b.js
+correctness risk   2.8   2.0
+readability        2.1   3.1
+handles backoff    3.8   0.4
+Best: a.js 0.93, b.js 0.07
+Scores: 0 = very poor, 4 = very good
+Cost: $0.00004
+```
+
+Scores are Jev's expected score per criterion, higher is better. The best
+pick and the `Toss-up` line work as in [Decide](#decide), and Claude adds
+its own one-line take. Jev reads the code but does not run it, so a high
+score is a second opinion, not a test result.
 
 ## How routing works
 
@@ -450,6 +485,9 @@ The generated `AGENTS.md`:
   `"router": false` in a project's `.claude/mynameisjev.json` stops it there.
 - With `/mynameisjev:check on`, each turn's request and Claude's final reply
   go to OpenRouter and TypeSafe, with the same redaction.
+- `/mynameisjev:compare` sends the code it compares (file contents, or
+  snippets Claude adds) to OpenRouter and TypeSafe, only when you run it,
+  with the same redaction. It reads only files inside the project.
 - `/mynameisjev:decide` sends its options, criteria and any context Claude
   adds to OpenRouter and TypeSafe, only when you run it, with the same
   redaction.
