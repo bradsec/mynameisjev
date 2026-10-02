@@ -37,6 +37,8 @@ const DEFAULT_STATE = {
     enforced: 0,
     // Claude file edits jev-codex-steps.js denied while routed to Codex.
     editsBlocked: 0,
+    // Completeness checks run and stops they blocked (jev-check.js).
+    checks: 0, checkBlocks: 0,
   },
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
@@ -56,6 +58,9 @@ const DEFAULT_STATE = {
   // context (`/mynameisjev:coldguard on`), once per expiry (coldGuardKey).
   coldGuard: false,
   coldGuardKey: null,
+  // Check at each stop that the reply covers every part of the request,
+  // and continue once if not (`/mynameisjev:check on`, jev-check.js).
+  completeCheck: false,
   // Set the model of general-purpose subagents to the Claude helper Jev
   // suggested for the message (`/mynameisjev:enforce on`).
   enforce: false,

@@ -23,7 +23,7 @@ const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
-  decide: decideCommand,
+  decide: decideCommand, check: checkCommand,
 };
 
 (async () => {
@@ -102,7 +102,8 @@ async function status() {
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
   }
 
-  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}`);
+  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}`);
+  if (state.completeCheck || s.checks) console.log(`Completeness checks: ${s.checks || 0} run, ${s.checkBlocks || 0} continued`);
   if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
   if (state.sync) {
     const rtk = sync.rtkStatus();
@@ -271,6 +272,12 @@ async function coldguardCommand([arg]) {
   if (toggle('coldGuard', 'Cold-cache guard', arg)) return;
   if (arg) throw new Error('usage: /mynameisjev:coldguard [on | off]');
   console.log(`Cold-cache guard: ${onOff(state.coldGuard)}. When on, the first message after the prompt cache expired on a context of 100k tokens or more is blocked once, so you can /compact or /clear first; sending it again goes through. Needs the mynameisjev status line. usage: /mynameisjev:coldguard [on | off]`);
+}
+
+async function checkCommand([arg]) {
+  if (toggle('completeCheck', 'Completeness check', arg)) return;
+  if (arg) throw new Error('usage: /mynameisjev:check [on | off]');
+  console.log(`Completeness check: ${onOff(state.completeCheck)}. When on, Jev checks at each stop that Claude's reply covers every part of your request; if a part looks missed, Claude continues once to finish it or say why. Sends your request and Claude's final reply to OpenRouter each turn. usage: /mynameisjev:check [on | off]`);
 }
 
 // A new file for /mynameisjev:handoff to write, outside the project so it is

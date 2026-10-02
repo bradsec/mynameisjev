@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.10
+
+- `/mynameisjev:check on` (opt-in): a Stop hook asks Jev whether Claude's
+  final reply covers each part of the request (list items, else sentences).
+  If a part looks missed and Claude is not waiting on the user, Claude
+  continues once with the missed parts quoted. Never blocks twice in a turn
+  or on a failed call. `/mynameisjev:status` counts checks and continues.
+
 ## 0.3.9
 
 - `/mynameisjev:decide`: Jev picks between 2 to 8 options, typed as

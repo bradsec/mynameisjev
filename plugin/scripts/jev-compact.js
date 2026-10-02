@@ -129,7 +129,7 @@ function restore(hookInput) {
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: saved.digest } };
 }
 
-module.exports = { buildDigest, save, restore, digestPath };
+module.exports = { buildDigest, save, restore, digestPath, readTail, userText };
 
 if (require.main === module) {
   const mode = process.argv[2];
