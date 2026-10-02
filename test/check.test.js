@@ -92,6 +92,7 @@ test('handle blocks once with the missed parts quoted', async () => {
   assert.strictEqual(s.stats.checks, 1);
   assert.strictEqual(s.stats.checkBlocks, 1);
   assert.strictEqual(s.lastCall.ok, true);
+  assert.deepStrictEqual(s.costs.check, { calls: 1, cost: 0.00003 });
 });
 
 test('handle lets the turn stop when every part is covered', async () => {

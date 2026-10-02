@@ -125,3 +125,8 @@ test('the Jev request asks the effort question with four levels', () => {
   assert.strictEqual(q.type, 'score');
   assert.strictEqual(q.criteria.length, 4);
 });
+
+test('sizing calls record their cost under sizing', () => {
+  const r = run('Write a short email to my landlord about the faucet.');
+  assert.deepStrictEqual(r.state.costs.sizing, { calls: 1, cost: 0.00002 });
+});

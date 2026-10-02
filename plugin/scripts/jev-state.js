@@ -47,7 +47,9 @@ const DEFAULT_STATE = {
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
   helperTokens: {},
+  // Total Jev cost in USD, and per feature (addCost): { sizing: { calls, cost } }.
   cost: 0,
+  costs: {},
   lastSilent: null,
   // Outcome of the most recent Jev API call, shown by the status line:
   // { at, ok, error? }.
@@ -121,9 +123,10 @@ function readState() {
       stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
       codexTiers: { ...(parsed.codexTiers || {}) },
       helperTokens: { ...(parsed.helperTokens || {}) },
+      costs: { ...(parsed.costs || {}) },
     };
   } catch (e) {
-    return { ...DEFAULT_STATE, stats: { ...DEFAULT_STATE.stats }, codexTiers: {}, helperTokens: {} };
+    return { ...DEFAULT_STATE, stats: { ...DEFAULT_STATE.stats }, codexTiers: {}, helperTokens: {}, costs: {} };
   }
 }
 
@@ -170,11 +173,20 @@ function readProjectConfig(dir) {
 const COLD_GUARD_TOKENS = 100000;
 
 // The project directory a hook or command runs for.
+// Counts one Jev call for a feature (sizing, check, decide, compare,
+// tiebreak) and adds its cost to the feature and to the total.
+function addCost(state, feature, amount) {
+  const cost = Number.isFinite(amount) ? amount : 0;
+  const prev = state.costs[feature] || { calls: 0, cost: 0 };
+  state.costs[feature] = { calls: prev.calls + 1, cost: prev.cost + cost };
+  state.cost += cost;
+}
+
 function projectDir(fallback) {
   return process.env.CLAUDE_PROJECT_DIR || fallback || null;
 }
 
 module.exports = {
   PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, DEFAULT_STATE, readState, writeState,
-  PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS,
+  PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
 };

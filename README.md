@@ -437,7 +437,9 @@ status line shows `off in project` or `project config error`, and
 
 `/mynameisjev:report` shows:
 
-- Jev calls and their cost
+- Jev calls and their cost, per feature: sizing, the completeness check,
+  `decide`, `compare` and tiebreak. Cost recorded before 0.3.14 shows as
+  one `earlier` row, with the messages sized before then
 - Claude helper and Codex notes given, next to the hand-offs that ran (runs
   include hand-offs Claude started without a note)
 - `+` overrides used, and notes suppressed because a hand-off would not pay off

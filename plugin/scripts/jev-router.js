@@ -837,7 +837,7 @@ function main() {
       }
 
       state.lastCall = { at: new Date().toISOString(), ok: true };
-      state.cost += result.cost || 0;
+      st.addCost(state, 'sizing', result.cost);
 
       // Topic-shift notice goes to the user, not Claude: only the user can run
       // /clear or /compact, and a systemMessage adds nothing to Claude's context.

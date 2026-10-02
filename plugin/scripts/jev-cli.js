@@ -129,12 +129,32 @@ async function status() {
 
 // What the router did and what it saved: notes given vs hand-offs that ran,
 // and the tokens the helper subagents used per model.
+// Jev calls and cost per feature. Cost recorded before per-feature tracking
+// (0.3.14) only reached the total, so it shows as "earlier", with the
+// messages sized before then (the sizing stats count every sizing call).
+function printCosts() {
+  const features = ['sizing', 'check', 'decide', 'compare', 'tiebreak'];
+  const used = features.filter((f) => state.costs[f] && state.costs[f].calls > 0);
+  const calls = used.reduce((n, f) => n + state.costs[f].calls, 0);
+  const tracked = used.reduce((n, f) => n + state.costs[f].cost, 0);
+  const s = state.stats;
+  const sized = s.tiny + s.everyday + s.large + s.hardest + s.unsure;
+  const earlierCalls = Math.max(0, sized - ((state.costs.sizing && state.costs.sizing.calls) || 0));
+  console.log(`Jev calls: ${calls + earlierCalls}, cost $${state.cost.toFixed(6)}`);
+  for (const f of used) {
+    console.log(`  ${f.padEnd(9)} ${String(state.costs[f].calls).padStart(5)}   $${state.costs[f].cost.toFixed(6)}`);
+  }
+  const earlier = state.cost - tracked;
+  if (earlier >= 0.0000005 || earlierCalls > 0) {
+    console.log(`  ${'earlier'.padEnd(9)} ${String(earlierCalls || '').padStart(5)}   $${Math.max(0, earlier).toFixed(6)}   (before per-feature tracking)`);
+  }
+}
+
 async function report() {
   const s = state.stats;
   const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
-  const calls = s.tiny + s.everyday + s.large + s.hardest + s.unsure;
+  printCosts();
   print([
-    `Jev calls: ${calls}, cost $${state.cost.toFixed(6)}${calls > 0 ? ` ($${(state.cost / calls).toFixed(6)} each)` : ''}`,
     'Hand-offs (notes given / runs):',
     `  Claude helpers:   ${s.helper} / ${s.helperRuns}`,
     `  Codex:            ${s.codex} / ${s.codexRuns}`,
@@ -311,6 +331,18 @@ async function stdinCommand(name, run) {
   }
 }
 
+// Wraps askJev so each call's cost is recorded under the feature, and saved
+// even when the command then fails.
+function costedAsk(feature) {
+  const { askJev } = require('./jev-api');
+  return async (...args) => {
+    const data = await askJev(...args);
+    st.addCost(state, feature, data && data.usage && data.usage.cost);
+    st.writeState(state);
+    return data;
+  };
+}
+
 // --auto marks a call from the jev-tiebreak skill: it passes the tiebreak
 // gate (on, and under the per-turn cap) or Claude is told to decide itself.
 function autoGate(args) {
@@ -336,13 +368,15 @@ async function tiebreakStatus() {
 
 async function decideCommand(args) {
   if (!autoGate(args)) return;
-  await stdinCommand('decide', (input) => require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY));
+  const ask = costedAsk(args.includes('--auto') ? 'tiebreak' : 'decide');
+  await stdinCommand('decide', (input) => require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY, ask));
 }
 
 async function compareCommand(args) {
   if (!autoGate(args)) return;
   const cwd = process.cwd();
-  await stdinCommand('compare', (input) => require('./jev-compare').compare(input, process.env.OPENROUTER_API_KEY, { root: st.projectDir(cwd), cwd }));
+  const ask = costedAsk(args.includes('--auto') ? 'tiebreak' : 'compare');
+  await stdinCommand('compare', (input) => require('./jev-compare').compare(input, process.env.OPENROUTER_API_KEY, { root: st.projectDir(cwd), cwd, ask }));
 }
 
 async function transferCommand([arg]) {

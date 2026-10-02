@@ -137,7 +137,7 @@ async function handle(hookInput, { ask = askJev, env = process.env } = {}) {
     const answers = (data && data.answers) || {};
     if (!answers.p1) throw new Error('response had no part answers');
     missed = missedParts(answers, parts);
-    state.cost += (data.usage && data.usage.cost) || 0;
+    st.addCost(state, 'check', data.usage && data.usage.cost);
     state.lastCall = { at: new Date().toISOString(), ok: true };
   } catch (e) {
     state.lastCall = { at: new Date().toISOString(), ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.14
+
+- `/mynameisjev:report` shows Jev calls and cost per feature: sizing, the
+  completeness check, `decide`, `compare` and tiebreak. Cost recorded
+  before this version shows as one `earlier` row.
+- `decide` and `compare` now count toward the Jev cost; before, their calls
+  were not recorded.
+
 ## 0.3.13
 
 - Effort advice: the router's Jev call also scores the reasoning effort
