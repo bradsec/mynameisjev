@@ -33,7 +33,8 @@ test('statusLine reports off, or the calls left this turn', () => {
 });
 
 test('skill file is Claude-only and runs the CLI with --auto', () => {
-  const skill = fs.readFileSync(path.join(__dirname, '..', 'plugin', 'skills', 'jev-tiebreak', 'SKILL.md'), 'utf8');
+  // Windows checkouts may convert line endings to CRLF.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'plugin', 'skills', 'jev-tiebreak', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(skill, /^---\nname: jev-tiebreak\ndescription: .+\nuser-invocable: false\n/);
   assert.match(skill, /!`node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/jev-cli\.js" tiebreak-status`/);
   assert.match(skill, /jev-cli\.js" decide --auto/);
