@@ -37,6 +37,9 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
 - **Status line (optional).** Router state and OpenRouter access, context,
   Claude 5-hour and 7-day usage, cache health, git, cost, plus a Codex usage
   line when Codex is available.
+- **Quick decisions.** `/mynameisjev:decide` asks Jev to pick between
+  options you type, or the ones the conversation is weighing, and shows the
+  probability of each. See [Decide](#decide).
 
 Everything else is opt-in (see [Optional features](#optional-features)).
 
@@ -200,6 +203,7 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | --- | --- |
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
+| `/mynameisjev:decide [A \| B -- criteria]` | Jev picks between options; see [Decide](#decide) |
 | `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
 | `/mynameisjev:coldguard` | Opt-in, see below |
 | `/mynameisjev:enforce` | Opt-in, see below |
@@ -212,6 +216,32 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 | `/mynameisjev:caveman` | Opt-in, see below |
 | `/mynameisjev:transfer` | Opt-in, see below |
 | `/mynameisjev:update` | Opt-in, see below |
+
+## Decide
+
+`/mynameisjev:decide` asks Jev to pick one of 2 to 8 options:
+
+```text
+/mynameisjev:decide zod | valibot -- bundle size, DX
+/mynameisjev:decide
+```
+
+With arguments, options are split on `|` and anything after ` -- ` is the
+criteria. Jev sees only what you typed. With no arguments, Claude takes the
+options the conversation is choosing between (for example, fixes it
+proposed) and sends them with a short summary of the goal and constraints.
+
+```text
+Pick: valibot  0.71
+      zod      0.29
+Cost: $0.00002
+```
+
+The numbers are Jev's probability for each option. When the top two are
+within 0.15, a `Toss-up` line says either is defensible. Jev gives no
+reasons, so Claude adds one line marked **Claude's take**, its own opinion.
+Jev cannot run code or see files Claude does not send, so treat the pick as
+a cheap second opinion, not a verdict. Text only: Jev takes no images.
 
 ## How routing works
 
@@ -416,6 +446,9 @@ The generated `AGENTS.md`:
   detection, the first 1,000 characters of your previous message) goes to
   OpenRouter and TypeSafe. `/mynameisjev:off` stops it everywhere;
   `"router": false` in a project's `.claude/mynameisjev.json` stops it there.
+- `/mynameisjev:decide` sends its options, criteria and any context Claude
+  adds to OpenRouter and TypeSafe, only when you run it, with the same
+  redaction.
 - Likely secrets are replaced with `[REDACTED]` first: common API key and
   token formats (OpenAI, Anthropic, OpenRouter, GitHub, AWS, Slack, Google,
   Stripe, JWTs, bearer tokens), private key blocks, credentials in URLs, and

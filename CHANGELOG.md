@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.9
+
+- `/mynameisjev:decide`: Jev picks between 2 to 8 options, typed as
+  `A | B -- criteria` or taken by Claude from the conversation, and shows
+  each option's probability, a toss-up note when the top two are close, and
+  the cost. Claude adds one line with its own reason, labelled as such.
+- The Jev request moved into `jev-api.js`, shared by the router and decide.
+
 ## 0.3.8
 
 - Codex steps hand-offs now happen. Near Claude's limit the note told

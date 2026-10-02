@@ -23,6 +23,7 @@ const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
+  decide: decideCommand,
 };
 
 (async () => {
@@ -281,6 +282,21 @@ async function handoffPath() {
   const folder = path.join(st.dataDir, 'handoffs');
   fs.mkdirSync(folder, { recursive: true });
   console.log(path.join(folder, `${name}-${stamp}.md`));
+}
+
+// Reads the decide input as JSON on stdin; the command passes it through a
+// quoted heredoc so the user's "|" and quotes never reach a shell. Exits 1
+// on failure so Claude sees the call failed.
+async function decideCommand() {
+  try {
+    const raw = fs.readFileSync(0, 'utf8');
+    let input;
+    try { input = JSON.parse(raw); } catch (e) { throw new Error(`decide expects JSON on stdin (${e.message})`); }
+    print(await require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY));
+  } catch (e) {
+    process.exitCode = 1;
+    throw e;
+  }
 }
 
 async function transferCommand([arg]) {

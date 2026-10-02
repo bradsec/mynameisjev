@@ -39,6 +39,7 @@ const caveman = require('./jev-caveman');
 const sync = require('./jev-sync');
 const updates = require('./jev-updates');
 const { redact } = require('./jev-redact');
+const { askJev } = require('./jev-api');
 const jevPace = require('./jev-pace');
 
 // Written by the jev-model-switch PostModelSwitch hook.
@@ -538,8 +539,6 @@ const SHIFT_QUESTION = {
 };
 
 async function classify(prompt, previous, apiKey) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const state = { message: redact(prompt).slice(0, 4000) };
   const questions = {
     size: {
@@ -581,36 +580,22 @@ async function classify(prompt, previous, apiKey) {
     state.previous_message = previous;
     questions.shift = SHIFT_QUESTION;
   }
-  try {
-    const res = await fetch('https://openrouter.ai/api/alpha/decisions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ model: 'typesafe/jev-1.13', state, questions }),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const answer = data.answers && data.answers.size;
-    if (!answer) throw new Error('response had no size answer');
-    const noul = (key) => {
-      const value = data.answers[key] && data.answers[key].noul;
-      return Number.isFinite(value) ? value : null;
-    };
-    return {
-      size: answer.choice,
-      confidence: answer.confidence,
-      shift: noul('shift'),
-      contained: noul('contained'),
-      heavy: noul('heavy'),
-      coding: noul('coding'),
-      cost: (data.usage && data.usage.cost) || 0,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  const data = await askJev(state, questions, { apiKey, timeoutMs: TIMEOUT_MS });
+  const answer = data.answers && data.answers.size;
+  if (!answer) throw new Error('response had no size answer');
+  const noul = (key) => {
+    const value = data.answers[key] && data.answers[key].noul;
+    return Number.isFinite(value) ? value : null;
+  };
+  return {
+    size: answer.choice,
+    confidence: answer.confidence,
+    shift: noul('shift'),
+    contained: noul('contained'),
+    heavy: noul('heavy'),
+    coding: noul('coding'),
+    cost: (data.usage && data.usage.cost) || 0,
+  };
 }
 
 function looksSkippable(prompt) {
