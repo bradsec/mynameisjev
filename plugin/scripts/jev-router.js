@@ -250,6 +250,47 @@ function modelStreak(streak, sessionId, sessionFamily, tier) {
   return { streak: null, notice };
 }
 
+// Effort levels Jev scores a message on, and the session levels they compare
+// with (max sits above every scored level).
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh'];
+const EFFORT_RANK = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+function effortLevel(score) {
+  if (!Number.isFinite(score)) return null;
+  return EFFORT_LEVELS[Math.min(EFFORT_LEVELS.length - 1, Math.max(0, Math.round(score)))];
+}
+
+// The session's effort level as the status line last saw it, or null.
+function sessionEffort(sessionId) {
+  if (!sessionId) return null;
+  try {
+    const saved = JSON.parse(fs.readFileSync(st.dataFile('session-effort.json'), 'utf8'))[sessionId];
+    return saved && typeof saved.level === 'string' ? saved.level : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Like modelStreak, for /effort: messages in a row that needed less (or
+// more) effort than the session runs at.
+function effortStreak(streak, sessionId, sessionLevel, level) {
+  const sessionRank = EFFORT_RANK[sessionLevel];
+  const rank = EFFORT_RANK[level];
+  if (!sessionId || sessionRank === undefined || rank === undefined) return { streak: null, notice: null };
+  const dir = rank < sessionRank ? 'down' : rank > sessionRank ? 'up' : null;
+  if (!dir) return { streak: null, notice: null };
+  const same = streak && streak.session === sessionId && streak.level === sessionLevel && streak.dir === dir;
+  const next = { session: sessionId, level: sessionLevel, dir, rank: same ? Math.max(streak.rank, rank) : rank, count: same ? streak.count + 1 : 1 };
+  if (next.count < (dir === 'down' ? STREAK_DOWN : STREAK_UP)) return { streak: next, notice: null };
+  const target = EFFORT_LEVELS[next.rank];
+  const notice = dir === 'down'
+    ? `Jev: the last ${next.count} messages needed ${target} effort or less, but this session runs ${sessionLevel}. ` +
+      `/effort ${target} would answer faster and cost less.`
+    : `Jev: the last ${next.count} messages needed ${target} effort, but this session runs ${sessionLevel}. ` +
+      `/effort ${target} may give better results for work like this.`;
+  return { streak: null, notice };
+}
+
 // Highest Claude plan usage across the 5h and 7d windows, as saved by the
 // status line, or null when unknown (API-key sessions have no plan limits):
 // { pct, window, resetsAt, fivePct, pace } with the 5h window's usage and
@@ -575,6 +616,16 @@ async function classify(prompt, previous, apiKey) {
         false: 'prose, a lookup, planning, or a question not about code',
       },
     },
+    effort: {
+      type: 'score',
+      instructions: 'How much reasoning effort does the message need, regardless of how big the job is?',
+      criteria: [
+        'low: mechanical or obvious, little thinking needed',
+        'medium: normal work with a few decisions',
+        'high: multi-step reasoning or careful design',
+        'xhigh: hard reasoning where a wrong call is expensive',
+      ],
+    },
   };
   if (previous) {
     state.previous_message = previous;
@@ -594,6 +645,7 @@ async function classify(prompt, previous, apiKey) {
     contained: noul('contained'),
     heavy: noul('heavy'),
     coding: noul('coding'),
+    effort: effortLevel(data.answers.effort && data.answers.effort.score),
     cost: (data.usage && data.usage.cost) || 0,
   };
 }
@@ -611,7 +663,7 @@ function looksSkippable(prompt) {
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
   routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice,
-  coldCache, coldGuardReason, modelStreak,
+  coldCache, coldGuardReason, modelStreak, effortLevel, effortStreak, sessionEffort,
   claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
@@ -816,6 +868,12 @@ function main() {
         const streak = modelStreak(state.modelStreak, sessionId, sessionFamily, tier);
         state.modelStreak = streak.streak;
         if (streak.notice) notices.push(streak.notice);
+        const effort = effortStreak(state.effortStreak, sessionId, sessionEffort(sessionId), result.effort);
+        state.effortStreak = effort.streak;
+        if (effort.notice) {
+          notices.push(effort.notice);
+          state.stats.effortNotices = (state.stats.effortNotices || 0) + 1;
+        }
         const advice = routeAdvice(tier, result, {
           sessionFamily,
           claude,

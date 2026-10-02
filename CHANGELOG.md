@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.13
+
+- Effort advice: the router's Jev call also scores the reasoning effort
+  each message needs (low to xhigh). After 5 messages in a row needing
+  less effort than the session's level, or 3 needing more, Jev suggests
+  `/effort <level>`. The status line records the session's effort level for
+  this, in `session-effort.json`.
+
 ## 0.3.12
 
 - `/mynameisjev:tiebreak on` (opt-in): a Claude-only `jev-tiebreak` skill

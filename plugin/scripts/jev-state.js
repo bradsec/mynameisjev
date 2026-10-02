@@ -41,6 +41,8 @@ const DEFAULT_STATE = {
     checks: 0, checkBlocks: 0,
     // Jev calls Claude made through the jev-tiebreak skill.
     tiebreaks: 0,
+    // /effort suggestions shown (jev-router.js effortStreak).
+    effortNotices: 0,
   },
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
@@ -56,6 +58,8 @@ const DEFAULT_STATE = {
   projectNotice: null,
   // Messages in a row sized off the session's model (jev-router modelStreak).
   modelStreak: null,
+  // Messages in a row scored off the session's effort (jev-router effortStreak).
+  effortStreak: null,
   // Block the first message after the prompt cache went cold on a large
   // context (`/mynameisjev:coldguard on`), once per expiry (coldGuardKey).
   coldGuard: false,

@@ -211,3 +211,15 @@ test('shows when the 5h window runs out at the current pace, and records history
   assert.match(out, /5H ████░░ 70% ↺ \d\d:\d\d →100% ~4\dm/);
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(limits, 'utf8')).history.map((s) => s.pct), [50, 70]);
 });
+
+test('records the session effort level for the router, only on change', () => {
+  const file = path.join(claudeDir, 'mynameisjev', 'session-effort.json');
+  fs.rmSync(file, { force: true });
+  line1({ enabled: true }, 'k', JSON.stringify({ model: { display_name: 'Opus 5.5' }, session_id: 'e1', effort: { level: 'high' } }));
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.strictEqual(saved.e1.level, 'high');
+  line1({ enabled: true }, 'k', JSON.stringify({ model: { display_name: 'Opus 5.5' }, session_id: 'e1', effort: { level: 'high' } }));
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).e1.at, saved.e1.at);
+  line1({ enabled: true }, 'k', JSON.stringify({ model: { display_name: 'Opus 5.5' }, session_id: 'e1', effort: { level: 'low' } }));
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).e1.level, 'low');
+});

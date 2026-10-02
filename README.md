@@ -308,6 +308,14 @@ A message sized for the session's own model, or a model switch, starts the
 count over. Switching re-reads the context once without the cache, which the
 notice mentions.
 
+The same call also scores how much reasoning effort each message needs
+(low, medium, high or xhigh), separately from its size, and Jev suggests
+`/effort` on the same pattern: 5 messages in a row needing less effort than
+the session runs at, or 3 needing more. This needs the session's effort
+level, which only the status line sees, so it works with Jev's status line
+installed or wrapped, and stays quiet on models without an effort setting.
+`/mynameisjev:status` counts the suggestions shown.
+
 ### Topic shifts and handoffs
 
 When Jev flags a new task, `/clear` drops the old context for free. To come
@@ -509,7 +517,7 @@ The generated `AGENTS.md`:
 ## Files
 
 Everything the plugin writes lives in `~/.claude/mynameisjev/` (inside
-`CLAUDE_CONFIG_DIR` when set): settings and stats, usage and prompt cache
+`CLAUDE_CONFIG_DIR` when set): settings and stats, usage, prompt cache and session effort
 state, compaction digests (deleted once used), handoff notes, the status line
 launcher. Uninstalling the plugin leaves this folder; delete it to remove
 all traces:

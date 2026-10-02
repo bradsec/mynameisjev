@@ -86,6 +86,7 @@ async function status() {
     // These overlap the size counts above, so they stay out of the total.
     `Topic shifts flagged: ${s.shift}`,
     `Delegation notes suppressed (no gain): ${s.suppressed}`,
+    `Effort suggestions shown: ${s.effortNotices || 0}`,
     `Jev cost so far: $${state.cost.toFixed(6)}`,
   ]);
   if (state.lastSilent) console.log(`Last silent: ${state.lastSilent.reason} (${state.lastSilent.at})`);

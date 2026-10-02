@@ -252,3 +252,48 @@ test('helpers carry their effort: hardest has its own xhigh helper', () => {
   assert.match(router.delegationAdvice('everyday', result(), 'opus'), /\(sonnet, medium effort\)/);
   assert.match(router.overrideAdvice(router.parseOverride('+large x'), ctx()).note, /"mynameisjev:large" subagent \(opus, high effort\)/);
 });
+
+test('effortLevel rounds a Jev score to a level, null when missing', () => {
+  assert.strictEqual(router.effortLevel(0.2), 'low');
+  assert.strictEqual(router.effortLevel(1.6), 'high');
+  assert.strictEqual(router.effortLevel(3), 'xhigh');
+  assert.strictEqual(router.effortLevel(undefined), null);
+});
+
+test('effort streak: suggests lower effort after 5 lighter messages', () => {
+  let streak = null;
+  let notice = null;
+  for (const level of ['low', 'medium', 'low', 'medium']) {
+    ({ streak, notice } = router.effortStreak(streak, 's', 'high', level));
+    assert.strictEqual(notice, null);
+  }
+  ({ streak, notice } = router.effortStreak(streak, 's', 'high', 'low'));
+  assert.match(notice, /last 5 messages needed medium effort or less, but this session runs high\. \/effort medium/);
+  assert.strictEqual(streak, null, 'starts over after the notice');
+});
+
+test('effort streak: suggests higher effort after 3 heavier messages, max counts as above xhigh', () => {
+  let r = router.effortStreak(null, 's', 'low', 'high');
+  r = router.effortStreak(r.streak, 's', 'low', 'xhigh');
+  r = router.effortStreak(r.streak, 's', 'low', 'high');
+  assert.match(r.notice, /needed xhigh effort, but this session runs low\. \/effort xhigh may give better results/);
+  assert.strictEqual(router.effortStreak(null, 's', 'max', 'xhigh').streak.dir, 'down');
+});
+
+test('effort streak: silent when the session effort or the level is unknown, resets on a change', () => {
+  assert.deepStrictEqual(router.effortStreak(null, 's', null, 'low'), { streak: null, notice: null });
+  assert.deepStrictEqual(router.effortStreak(null, 's', 'high', null), { streak: null, notice: null });
+  assert.deepStrictEqual(router.effortStreak(null, 's', 'turbo', 'low'), { streak: null, notice: null });
+  const one = router.effortStreak(null, 's', 'high', 'low').streak;
+  assert.strictEqual(router.effortStreak(one, 's', 'high', 'high').streak, null);
+  assert.strictEqual(router.effortStreak(one, 's2', 'high', 'low').streak.count, 1);
+  assert.strictEqual(router.effortStreak(one, 's', 'xhigh', 'low').streak.count, 1);
+});
+
+test('sessionEffort reads the level the status line saved for the session', () => {
+  const file = path.join(tmp, 'claude', 'mynameisjev', 'session-effort.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ s1: { level: 'high', at: Date.now() } }));
+  assert.strictEqual(router.sessionEffort('s1'), 'high');
+  assert.strictEqual(router.sessionEffort('s2'), null);
+});

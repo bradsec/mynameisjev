@@ -22,7 +22,7 @@ fs.writeFileSync(stub, `
 const fs = require('fs');
 global.fetch = async (url, opts) => {
   fs.appendFileSync(${JSON.stringify(sent)}, opts.body + '\\n');
-  return { ok: true, json: async () => ({ answers: { size: { choice: 'everyday', confidence: 0.9 }, contained: { noul: 0.9 }, heavy: { noul: 0.1 }, coding: { noul: 0.1 } }, usage: { cost: 0.00002 } }) };
+  return { ok: true, json: async () => ({ answers: { size: { choice: 'everyday', confidence: 0.9 }, contained: { noul: 0.9 }, heavy: { noul: 0.1 }, coding: { noul: 0.1 }, effort: { score: 0.2 } }, usage: { cost: 0.00002 } }) };
 };
 `);
 
@@ -117,4 +117,11 @@ test('every prompt sets promptAt, for the tiebreak cap', () => {
   assert.notStrictEqual(sized.state.promptAt, '2000-01-01T00:00:00.000Z');
   const skipped = run('ok', { state: { promptAt: '2000-01-01T00:00:00.000Z' } });
   assert.notStrictEqual(skipped.state.promptAt, '2000-01-01T00:00:00.000Z');
+});
+
+test('the Jev request asks the effort question with four levels', () => {
+  const r = run('Write a short email to my landlord about the faucet.');
+  const q = r.bodies[0].questions.effort;
+  assert.strictEqual(q.type, 'score');
+  assert.strictEqual(q.criteria.length, 4);
 });

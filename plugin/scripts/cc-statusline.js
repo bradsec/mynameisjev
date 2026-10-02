@@ -141,6 +141,26 @@ function sharePromptCache(session, pc) {
   try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
 }
 
+// Hooks never receive the effort level either; the router compares it with
+// the effort Jev scores each message at. Keyed by session, written on change.
+function shareEffort(session, level) {
+  let file;
+  let all = {};
+  try {
+    file = require('./jev-state').dataFile('session-effort.json');
+    all = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    if (!file) return;
+  }
+  if (all[session] && all[session].level === level) return;
+  const now = Date.now();
+  for (const [id, v] of Object.entries(all)) {
+    if (!v || !(now - v.at < PROMPT_CACHE_KEEP_MS)) delete all[id];
+  }
+  all[session] = { level, at: now };
+  try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
+}
+
 // Hooks never receive rate_limits, so share them with the Jev router
 // (jev-router.js) through a file, with a history of 5h samples for the pace
 // (jev-pace.js). Written only when the numbers change, since the status line
@@ -175,6 +195,7 @@ function recordForJev(data) {
     const sevenDay = data.rate_limits?.seven_day;
     if (fiveHour || sevenDay) limits = shareLimits(fiveHour, sevenDay);
     if (data.session_id && data.prompt_cache?.caching_observed) sharePromptCache(data.session_id, data.prompt_cache);
+    if (data.session_id && typeof data.effort?.level === 'string') shareEffort(data.session_id, data.effort.level);
   } catch (_) {
     // Never break the status line over the shared files.
   }
