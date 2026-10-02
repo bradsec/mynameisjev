@@ -39,6 +39,8 @@ const DEFAULT_STATE = {
     editsBlocked: 0,
     // Completeness checks run and stops they blocked (jev-check.js).
     checks: 0, checkBlocks: 0,
+    // Jev calls Claude made through the jev-tiebreak skill.
+    tiebreaks: 0,
   },
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
@@ -61,6 +63,12 @@ const DEFAULT_STATE = {
   // Check at each stop that the reply covers every part of the request,
   // and continue once if not (`/mynameisjev:check on`, jev-check.js).
   completeCheck: false,
+  // Let Claude ask Jev at a fork mid-task (`/mynameisjev:tiebreak on`,
+  // jev-tiebreak.js); tiebreakTurn counts calls in the current turn,
+  // promptAt (set by the router on every prompt) marks the turn.
+  tiebreak: false,
+  tiebreakTurn: null,
+  promptAt: null,
   // Set the model of general-purpose subagents to the Claude helper Jev
   // suggested for the message (`/mynameisjev:enforce on`).
   enforce: false,

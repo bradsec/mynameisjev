@@ -111,3 +111,10 @@ test('cold-cache guard blocks once per expiry, never slash commands, only when o
   assert.strictEqual(slash.out.decision, undefined);
   fs.rmSync(path.join(dataDir, 'prompt-cache.json'));
 });
+
+test('every prompt sets promptAt, for the tiebreak cap', () => {
+  const sized = run('Write a short email to my landlord about the faucet.', { state: { promptAt: '2000-01-01T00:00:00.000Z' } });
+  assert.notStrictEqual(sized.state.promptAt, '2000-01-01T00:00:00.000Z');
+  const skipped = run('ok', { state: { promptAt: '2000-01-01T00:00:00.000Z' } });
+  assert.notStrictEqual(skipped.state.promptAt, '2000-01-01T00:00:00.000Z');
+});

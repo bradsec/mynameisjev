@@ -725,6 +725,9 @@ function main() {
       // otherwise.
       const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
       setRoute(state, 'claude', sessionFamily, 'session', sessionId);
+      // Marks the turn for the tiebreak cap (jev-tiebreak.js); unlike
+      // route.at, nothing else changes it mid-turn.
+      state.promptAt = new Date().toISOString();
 
       const project = st.readProjectConfig(st.projectDir(cwd));
       if (project && project.error && state.projectNotice !== `${sessionId}:${project.path}`) {

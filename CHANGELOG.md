@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.12
+
+- `/mynameisjev:tiebreak on` (opt-in): a Claude-only `jev-tiebreak` skill
+  lets Claude ask Jev (`decide` or `compare`) at a reversible fork mid-task,
+  then tell you the pick in one line. It asks you instead about product,
+  security, data, cost or public API choices. Capped at 2 calls per turn;
+  `/mynameisjev:status` counts them.
+- The router records `promptAt` on every prompt, to mark the turn.
+
 ## 0.3.11
 
 - `/mynameisjev:compare`: Jev scores 2 to 4 code variants (project files,

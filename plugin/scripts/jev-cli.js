@@ -13,6 +13,7 @@ const caveman = require('./jev-caveman');
 const sync = require('./jev-sync');
 const plugins = require('./jev-plugins');
 const updates = require('./jev-updates');
+const tiebreak = require('./jev-tiebreak');
 
 const state = st.readState();
 const [cmd = 'status', ...args] = process.argv.slice(2).map((a) => a.toLowerCase());
@@ -24,6 +25,7 @@ const COMMANDS = {
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
   decide: decideCommand, check: checkCommand, compare: compareCommand,
+  tiebreak: tiebreakCommand, 'tiebreak-status': tiebreakStatus,
 };
 
 (async () => {
@@ -102,7 +104,8 @@ async function status() {
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
   }
 
-  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}`);
+  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}, tiebreak ${onOff(state.tiebreak)}`);
+  if (state.tiebreak || s.tiebreaks) console.log(`Tiebreak calls: ${s.tiebreaks || 0}`);
   if (state.completeCheck || s.checks) console.log(`Completeness checks: ${s.checks || 0} run, ${s.checkBlocks || 0} continued`);
   if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
   if (state.sync) {
@@ -307,11 +310,36 @@ async function stdinCommand(name, run) {
   }
 }
 
-async function decideCommand() {
+// --auto marks a call from the jev-tiebreak skill: it passes the tiebreak
+// gate (on, and under the per-turn cap) or Claude is told to decide itself.
+function autoGate(args) {
+  if (!args.includes('--auto')) return true;
+  const r = tiebreak.claim(state);
+  if (!r.ok) {
+    console.log(r.message);
+    return false;
+  }
+  st.writeState(state);
+  return true;
+}
+
+async function tiebreakCommand([arg]) {
+  if (toggle('tiebreak', 'Tiebreak', arg)) return;
+  if (arg) throw new Error('usage: /mynameisjev:tiebreak [on | off]');
+  console.log(`Tiebreak: ${onOff(state.tiebreak)}. When on, Claude may ask Jev to pick at a reversible fork mid-task (at most ${tiebreak.MAX_PER_TURN} calls per turn) and tells you what Jev picked. It asks you instead about product, security, data, cost or API choices. usage: /mynameisjev:tiebreak [on | off]`);
+}
+
+async function tiebreakStatus() {
+  console.log(tiebreak.statusLine(state));
+}
+
+async function decideCommand(args) {
+  if (!autoGate(args)) return;
   await stdinCommand('decide', (input) => require('./jev-decide').decide(input, process.env.OPENROUTER_API_KEY));
 }
 
-async function compareCommand() {
+async function compareCommand(args) {
+  if (!autoGate(args)) return;
   const cwd = process.cwd();
   await stdinCommand('compare', (input) => require('./jev-compare').compare(input, process.env.OPENROUTER_API_KEY, { root: st.projectDir(cwd), cwd }));
 }
