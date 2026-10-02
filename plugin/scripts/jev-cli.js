@@ -107,7 +107,7 @@ async function status() {
 
   console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}, tiebreak ${onOff(state.tiebreak)}`);
   if (state.tiebreak || s.tiebreaks) console.log(`Tiebreak calls: ${s.tiebreaks || 0}`);
-  if (state.completeCheck || s.checks) console.log(`Completeness checks: ${s.checks || 0} run, ${s.checkBlocks || 0} continued`);
+  if (state.completeCheck || s.checks) console.log(`Completeness checks: ${s.checks || 0} run, ${s.checkBlocks || 0} continued (${s.checkScope || 0} for edits beyond the request)`);
   if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
   if (state.sync) {
     const rtk = sync.rtkStatus();

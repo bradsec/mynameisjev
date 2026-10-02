@@ -157,3 +157,95 @@ test('hook script prints a block decision as JSON', () => {
   assert.strictEqual(out.decision, 'block');
   assert.match(out.reason, /update the README/);
 });
+
+// A transcript whose current turn edits files, after an older turn that
+// edited another one.
+function editTranscript(prompt, cwd) {
+  const file = path.join(tmp, `e-${Math.random().toString(36).slice(2)}.jsonl`);
+  const use = (name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+  const ok = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } };
+  const lines = [
+    { type: 'user', message: { role: 'user', content: 'an older request' } },
+    use('Edit', { file_path: path.join(cwd, 'old.js'), old_string: 'a', new_string: 'older change' }),
+    ok,
+    { type: 'user', message: { role: 'user', content: prompt } },
+    use('Edit', { file_path: path.join(cwd, 'src', 'fetch.js'), old_string: 'x', new_string: 'retry with backoff' }),
+    ok,
+    use('MultiEdit', { file_path: path.join(cwd, 'src', 'fetch.js'), edits: [{ old_string: 'y', new_string: 'second change' }] }),
+    ok,
+    use('Write', { file_path: path.join(cwd, 'test', 'fetch.test.js'), content: `test retry; key=sk-or-v1-${'a'.repeat(40)}` }),
+    ok,
+    use('NotebookEdit', { notebook_path: '/elsewhere/n.ipynb', new_source: 'cell' }),
+    ok,
+  ];
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  return file;
+}
+
+test('lastTurn returns the request and only this turn\'s edits, grouped by file', () => {
+  const t = check.lastTurn(editTranscript('Add a retry to the fetch helper and test it.', '/proj'), '/proj');
+  assert.strictEqual(t.request, 'Add a retry to the fetch helper and test it.');
+  assert.deepStrictEqual(t.edits.map((e) => e.file), [path.join('src', 'fetch.js'), path.join('test', 'fetch.test.js'), '/elsewhere/n.ipynb']);
+  assert.match(t.edits[0].text, /retry with backoff[\s\S]*second change/);
+  assert.ok(!t.edits.some((e) => e.file.includes('old.js')));
+});
+
+test('buildRequest sends redacted, clipped edits and one scope question per file', () => {
+  const edits = [
+    { file: 'a.js', text: `key=sk-or-v1-${'a'.repeat(40)} ${'x'.repeat(2000)}` },
+    ...Array.from({ length: 9 }, (_, i) => ({ file: `f${i}.js`, text: 'y' })),
+  ];
+  const { state, questions, files } = check.buildRequest('Fix the upload bug in a.js.', 'Fixed.', edits);
+  assert.match(questions.p1.instructions, /edits made this turn/);
+  assert.strictEqual(files.length, check.MAX_FILES);
+  assert.deepStrictEqual(Object.keys(questions).filter((k) => /^f\d+$/.test(k)).length, check.MAX_FILES);
+  assert.match(questions.f1.instructions, /a\.js/);
+  assert.ok(state.edits[0].change.length <= check.EDIT_CHARS);
+  assert.deepStrictEqual(state.other_edited_files, ['f7.js', 'f8.js']);
+  assert.doesNotMatch(JSON.stringify(state), /aaaaaaaaaa/);
+});
+
+test('buildRequest without edits matches the plain check', () => {
+  const { state, questions, files } = check.buildRequest('Fix the upload bug in a.js.', 'Fixed.', []);
+  assert.deepStrictEqual(files, []);
+  assert.strictEqual(state.edits, undefined);
+  assert.doesNotMatch(questions.p1.instructions, /edits/);
+  assert.deepStrictEqual(Object.keys(questions), ['p1', 'asks_user']);
+});
+
+test('unrelatedFiles: below threshold is unrelated; asks_user clears it', () => {
+  const files = ['a.js', 'b.js'];
+  assert.deepStrictEqual(check.unrelatedFiles({ f1: { noul: 0.9 }, f2: { noul: 0.1 }, asks_user: { noul: 0.1 } }, files), ['b.js']);
+  assert.deepStrictEqual(check.unrelatedFiles({ f1: { noul: 0.9 }, f2: { noul: 0.1 }, asks_user: { noul: 0.9 } }, files), []);
+});
+
+test('reasonText covers missed parts, unrelated files, or both', () => {
+  const both = check.reasonText(['update the README'], ['src/config.js']);
+  assert.match(both, /may not cover these parts[\s\S]*- "update the README"[\s\S]*may go beyond the request:\n- src\/config\.js/);
+  assert.match(both, /revert unrelated edits/);
+  const files = check.reasonText([], ['src/config.js']);
+  assert.doesNotMatch(files, /may not cover/);
+  assert.match(files, /src\/config\.js/);
+  assert.doesNotMatch(check.reasonText(['x part here'], []), /beyond the request/);
+});
+
+test('handle blocks on an unrelated file even when every part is covered', async () => {
+  setState();
+  const cwd = path.join(tmp, 'proj2');
+  const calls = [];
+  const ask = async (state, questions) => {
+    calls.push({ state, questions });
+    const answers = { asks_user: { noul: 0.05 } };
+    for (const k of Object.keys(questions)) if (/^p\d+$/.test(k)) answers[k] = { noul: 0.9 };
+    answers.f1 = { noul: 0.9 };
+    answers.f2 = { noul: 0.1 };
+    return { answers, usage: { cost: 0.00003 } };
+  };
+  const out = await check.handle(input({ cwd, transcript_path: editTranscript('Add a retry to the fetch helper.', cwd) }), { ask, env });
+  assert.strictEqual(out.decision, 'block');
+  assert.match(out.reason, new RegExp(`- ${path.join('test', 'fetch.test.js').replace(/\\/g, '\\\\\\\\')}`));
+  assert.doesNotMatch(out.reason, /may not cover/);
+  assert.match(out.systemMessage, /1 edited file/);
+  assert.strictEqual(readState().stats.checkScope, 1);
+  assert.ok(calls[0].state.edits.length >= 2);
+});

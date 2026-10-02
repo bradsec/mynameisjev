@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.15
+
+- The completeness check now reads the files Claude edited this turn (Edit,
+  MultiEdit, Write, NotebookEdit). Edits count as evidence that a part was
+  done, so finished work the reply does not mention is no longer flagged.
+  Each edited file (up to 8) also gets a yes/no on whether the request
+  needed it, and files that look unrelated are quoted in the block reason.
+  `/mynameisjev:status` counts these blocks.
+
 ## 0.3.14
 
 - `/mynameisjev:report` shows Jev calls and cost per feature: sizing, the

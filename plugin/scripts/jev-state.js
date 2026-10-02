@@ -38,7 +38,8 @@ const DEFAULT_STATE = {
     // Claude file edits jev-codex-steps.js denied while routed to Codex.
     editsBlocked: 0,
     // Completeness checks run and stops they blocked (jev-check.js).
-    checks: 0, checkBlocks: 0,
+    // checkScope: blocks that flagged edits beyond the request.
+    checks: 0, checkBlocks: 0, checkScope: 0,
     // Jev calls Claude made through the jev-tiebreak skill.
     tiebreaks: 0,
     // /effort suggestions shown (jev-router.js effortStreak).
