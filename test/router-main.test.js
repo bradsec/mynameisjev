@@ -22,11 +22,12 @@ fs.writeFileSync(stub, `
 const fs = require('fs');
 global.fetch = async (url, opts) => {
   fs.appendFileSync(${JSON.stringify(sent)}, opts.body + '\\n');
-  return { ok: true, json: async () => ({ answers: { size: { choice: 'everyday', confidence: 0.9 }, contained: { noul: 0.9 }, heavy: { noul: 0.1 }, coding: { noul: 0.1 }, effort: { score: 0.2 } }, usage: { cost: 0.00002 } }) };
+  const size = process.env.JEV_STUB_SIZE ? JSON.parse(process.env.JEV_STUB_SIZE) : { choice: 'everyday', confidence: 0.9 };
+  return { ok: true, json: async () => ({ answers: { size, contained: { noul: 0.9 }, heavy: { noul: 0.1 }, coding: { noul: 0.1 }, effort: { score: 0.2 } }, usage: { cost: 0.00002 } }) };
 };
 `);
 
-function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = false } = {}) {
+function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = false, size } = {}) {
   if (!keepState) fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true, ...over }));
   const cfg = path.join(project, '.claude', 'mynameisjev.json');
   if (config === undefined) fs.rmSync(cfg, { force: true });
@@ -35,6 +36,7 @@ function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = fa
   const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex'), CLAUDE_PROJECT_DIR: project, HOME: tmp, USERPROFILE: tmp };
   delete env.OPENROUTER_API_KEY;
   if (key) env.OPENROUTER_API_KEY = key;
+  if (size) env.JEV_STUB_SIZE = JSON.stringify(size);
   const input = JSON.stringify({ prompt, session_id: 's1', cwd: project });
   const out = execFileSync(process.execPath, ['--require', stub, script], { input, env }).toString();
   const bodies = fs.existsSync(sent) ? fs.readFileSync(sent, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
@@ -50,6 +52,15 @@ test('secrets are redacted from the Jev request and the stored prompt', () => {
   assert.ok(!body.includes(secret), 'key sent to Jev');
   assert.match(body, /\[REDACTED\]/);
   assert.ok(!r.state.lastPrompt.text.includes(secret), 'key stored in state');
+  assert.strictEqual(r.bodies[0].model, 'typesafe/jev-1.14');
+});
+
+test('a size answer without a confidence counts as unsure, not failed', () => {
+  const r = run('Write a short email to my landlord about the faucet.', { size: { choice: 'everyday' } });
+  assert.strictEqual(r.state.stats.unsure, 1);
+  assert.strictEqual(r.state.stats.everyday, 0);
+  assert.strictEqual(r.state.stats.failed, 0);
+  assert.match(r.state.lastSilent.reason, /no confidence/);
 });
 
 test('project config router:false sends nothing', () => {

@@ -65,7 +65,7 @@ test('route: with Codex, self-contained coding goes to Codex', () => {
   const r = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk }));
   assert.strictEqual(r.codex, true);
   assert.match(r.note, /Route it to Codex/);
-  assert.match(r.note, /codex-companion\.mjs" task --model gpt-6-sol --effort medium/);
+  assert.match(r.note, /codex-companion\.mjs" task --model gpt-6.1-sol --effort medium/);
 });
 
 test('route: busy Codex falls back to Claude', () => {
@@ -167,7 +167,7 @@ test('override: parses "+" prefixes, not look-alikes', () => {
 
 test('override: tier and claude notes', () => {
   const tier = router.overrideAdvice(router.parseOverride('+tiny rename x'), ctx());
-  assert.match(tier.note, /"mynameisjev:tiny" subagent \(haiku\)\. Delegate it without asking/);
+  assert.match(tier.note, /"mynameisjev:tiny" subagent \(haiku, low effort\)\. Delegate it without asking/);
   assert.deepStrictEqual(tier.route, ['claude', 'haiku', 'suggested']);
   const here = router.overrideAdvice(router.parseOverride('+claude do it'), ctx());
   assert.match(here.note, /Handle this message here/);

@@ -21,7 +21,7 @@ const ROUTE_MAX_AGE_MS = 60 * 60 * 1000;
 // The hook output for an edit call, or null to leave it alone.
 function guard(hookInput, state, nowMs, companion) {
   if (!state.enabled || !state.enforce || !companion || !EDIT_TOOLS.has(hookInput.tool_name)) return null;
-  const route = state.route;
+  const route = st.routeFor(state, hookInput.session_id);
   if (!route || route.target !== 'codex') return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
   if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;

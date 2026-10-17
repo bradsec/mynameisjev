@@ -25,7 +25,7 @@ function enforce(hookInput, state, nowMs) {
   if (!state.enabled || !state.enforce || hookInput.tool_name !== 'Agent') return null;
   const input = hookInput.tool_input || {};
   if (input.model || !GENERAL_TYPES.has(input.subagent_type)) return null;
-  const route = state.route;
+  const route = st.routeFor(state, hookInput.session_id);
   if (!route || route.target !== 'claude' || route.how !== 'suggested' || !HELPER_MODELS.has(route.model)) return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
   if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;

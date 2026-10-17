@@ -63,7 +63,7 @@ async function watch(hookInput) {
   const ran = handOff(hookInput);
   if (ran) {
     // session keeps the Codex edit guard (jev-codex-steps.js) on for this turn.
-    current.route = { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null };
+    st.putRoute(current, { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null });
     current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
     try { st.writeState(current); } catch (e) { /* the status line just misses one update */ }
   }

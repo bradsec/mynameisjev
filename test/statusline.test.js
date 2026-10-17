@@ -50,6 +50,14 @@ test('route: session model, suggestion, and a hand-off that ran', () => {
   assert.match(line1({ ...ok, route: { at: now, target: 'codex', model: 'default', how: 'ran' } }, 'k'), /→ codex ✓/);
 });
 
+test('route: each session shows its own', () => {
+  const now = new Date().toISOString();
+  const mine = { at: now, target: 'claude', model: 'sonnet', how: 'ran', session: 's1' };
+  const theirs = { at: now, target: 'claude', model: 'opus', how: 'session', session: 's2' };
+  const state = { enabled: true, lastCall: { ok: true }, route: theirs, routes: { s1: mine, s2: theirs } };
+  assert.match(line1(state, 'k', '{"model":{"display_name":"Opus 5.5"},"session_id":"s1"}'), /→ sonnet ✓/);
+});
+
 test('route: hidden after 30 minutes', () => {
   const old = new Date(Date.now() - 31 * 60 * 1000).toISOString();
   assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true }, route: { at: old, target: 'claude', model: 'opus', how: 'session' } }, 'k'), /→/);

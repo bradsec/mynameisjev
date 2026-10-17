@@ -5,6 +5,7 @@ description: >
   TINY: a lookup, a rename, a one-line answer. Self-contained work only.
 tools: [Read, Edit, Grep, Glob, Bash]
 model: haiku
+effort: low
 ---
 
 Do the self-contained task you were given. No scope creep, no exploration

@@ -28,3 +28,10 @@ test('leaves the call alone otherwise', () => {
   assert.strictEqual(enforce(call(), state({ route: route({ at: new Date(now - 2 * 3600000).toISOString() }) }), now), null, 'stale');
   assert.strictEqual(enforce(call({}, { tool_name: 'Bash' }), state(), now), null, 'not Agent');
 });
+
+test('another session\'s newer route does not lift this session\'s suggestion', () => {
+  const mine = route();
+  const theirs = route({ session: 's2', how: 'session', model: 'opus' });
+  const out = enforce(call(), state({ route: theirs, routes: { s1: mine, s2: theirs } }), now);
+  assert.strictEqual(out.hookSpecificOutput.updatedInput.model, 'sonnet');
+});

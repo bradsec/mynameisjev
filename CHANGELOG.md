@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.16
+
+- Sizing uses Jev 1.14 (`typesafe/jev-1.14`), at the same price as 1.13.
+- The default Codex model for everyday work is `gpt-6.1-sol`, Codex's
+  current default; `gpt-6-sol` is now its previous generation. Overrides set
+  with `/mynameisjev:codex set` are unchanged.
+- `mynameisjev:tiny` runs Haiku at low effort. Haiku 5.5 takes an effort
+  setting; it defaulted to medium.
+- Each session keeps its own route. With two sessions open, a prompt in one
+  no longer lifts hand-off enforcement or the Codex edit guard in the other,
+  and each status line shows its own session's route.
+- Hooks that update the state file at the same time no longer lose each
+  other's changes: a write merges into the file's current contents. State
+  and shared cache files are written to a temp file and renamed into place,
+  so a reader never sees a half-written file.
+- A Jev size answer with no confidence counts as unsure instead of failing
+  the hook after counting the message.
+
 ## 0.3.15
 
 - The completeness check now reads the files Claude edited this turn (Edit,

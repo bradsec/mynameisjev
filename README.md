@@ -16,12 +16,12 @@ produce bulky output, is it coding, is it a new topic) and turns the answers
 into a short routing note for Claude. One Jev call costs about $0.00002.
 
 - **Model-aware delegation.** Knows which Claude model the session runs and
-  only suggests a helper (`mynameisjev:tiny` on Haiku, `:everyday` on Sonnet
-  at medium effort, `:large` on Opus at high effort, `:hardest` on Opus at
-  extra-high effort) when it is cheaper, stronger, or keeps bulky output out
-  of your main context. Tiny jobs and jobs that need the conversation stay
-  put. `/mynameisjev:enforce on` makes general-purpose subagents use the
-  suggested model.
+  only suggests a helper (`mynameisjev:tiny` on Haiku at low effort,
+  `:everyday` on Sonnet at medium effort, `:large` on Opus at high effort,
+  `:hardest` on Opus at extra-high effort) when it is cheaper, stronger, or
+  keeps bulky output out of your main context. Tiny jobs and jobs that need
+  the conversation stay put. `/mynameisjev:enforce on` makes general-purpose
+  subagents use the suggested model.
 - **Topic-shift notices.** Tells you when a message starts an unrelated task,
   so you can `/clear` instead of paying for stale context.
   `/mynameisjev:handoff` saves a note of the old task first.
@@ -172,8 +172,8 @@ minutes):
 | Shows | Meaning |
 | --- | --- |
 | `→ opus` (grey) | Handled on the session's own Claude model |
-| `→ sonnet?`, `→ codex gpt-6-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
-| `→ sonnet ✓`, `→ codex gpt-6-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
+| `→ sonnet?`, `→ codex gpt-6.1-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
+| `→ sonnet ✓`, `→ codex gpt-6.1-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
 | `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on |
 | `off in project`, `project config error` | See [Per-project settings](#per-project-settings) |
 
@@ -356,7 +356,7 @@ Default Codex models per size (change with `/mynameisjev:codex set`):
 | Size | Codex model | Effort |
 | --- | --- | --- |
 | tiny | `gpt-6-luna` | low |
-| everyday | `gpt-6-sol` | medium |
+| everyday | `gpt-6.1-sol` | medium |
 | large | `gpt-6-astra` | medium |
 | hardest | `gpt-6-astra` | high |
 

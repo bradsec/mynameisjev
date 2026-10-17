@@ -21,6 +21,22 @@ function dataFile(name) {
   return path.join(dataDir, name);
 }
 
+// Hooks and the status line read these files while others write them, so a
+// write goes to a temp file and is renamed into place: readers see the old
+// file or the new one, never half of one. Windows refuses the rename while
+// another process has the file open; then it falls back to a direct write.
+function writeFileAtomic(file, text) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmp, text);
+  try {
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
+    if (e.code !== 'EPERM' && e.code !== 'EACCES' && e.code !== 'EBUSY') throw e;
+    fs.writeFileSync(file, text);
+  }
+}
+
 // Everything beyond sizing and routing is opt-in: several features change
 // files outside Jev (Codex's AGENTS.md, plugin installs, Codex threads).
 const DEFAULT_STATE = {
@@ -76,6 +92,11 @@ const DEFAULT_STATE = {
   tiebreak: false,
   tiebreakTurn: null,
   promptAt: null,
+  // Where each session's latest message went (putRoute, routeFor), newest
+  // MAX_ROUTE_SESSIONS kept; route is the latest of them, for readers with no
+  // session.
+  route: null,
+  routes: {},
   // Set the model of general-purpose subagents to the Claude helper Jev
   // suggested for the message (`/mynameisjev:enforce on`).
   enforce: false,
@@ -109,7 +130,30 @@ const DEFAULT_STATE = {
 // Settings files written by earlier, non-plugin versions of Jev.
 const LEGACY_STATE = path.join(claudeDir, '.jev-router-state.json');
 
+// The state as read, kept on the object for writeState's merge. A symbol, so
+// JSON.stringify and object spreads leave it out.
+const BASE = Symbol('jev-state-base');
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+function normalize(parsed) {
+  return {
+    ...DEFAULT_STATE,
+    ...parsed,
+    stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
+    codexTiers: { ...(parsed.codexTiers || {}) },
+    helperTokens: { ...(parsed.helperTokens || {}) },
+    costs: { ...(parsed.costs || {}) },
+    routes: { ...(parsed.routes || {}) },
+  };
+}
+
 function readState() {
+  const state = readStateFile();
+  Object.defineProperty(state, BASE, { value: clone(state), writable: true });
+  return state;
+}
+
+function readStateFile() {
   let raw = null;
   try {
     raw = fs.readFileSync(statePath, 'utf8');
@@ -117,22 +161,83 @@ function readState() {
     try { raw = fs.readFileSync(LEGACY_STATE, 'utf8'); } catch (e2) { /* fresh install */ }
   }
   try {
-    const parsed = raw ? JSON.parse(raw) : {};
-    return {
-      ...DEFAULT_STATE,
-      ...parsed,
-      stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
-      codexTiers: { ...(parsed.codexTiers || {}) },
-      helperTokens: { ...(parsed.helperTokens || {}) },
-      costs: { ...(parsed.costs || {}) },
-    };
+    return normalize(raw ? JSON.parse(raw) : {});
   } catch (e) {
-    return { ...DEFAULT_STATE, stats: { ...DEFAULT_STATE.stats }, codexTiers: {}, helperTokens: {}, costs: {} };
+    return normalize({});
   }
 }
 
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+// Maps (stats, costs, routes, ...) hold only numbers and objects; records
+// (a route, lastCall, a streak) also hold strings and are replaced whole.
+const isMap = (v) => isPlainObject(v) && Object.values(v).every((x) => typeof x === 'number' || isPlainObject(x));
+
+// Three-way merge of this process's changes (ours vs base, the state it read)
+// onto what is on disk now, which another hook may have written meanwhile.
+// Values this process left alone keep the disk's; changed counters add their
+// difference; maps merge per key; other changes overwrite.
+function merge(base, ours, disk, top = false) {
+  if (JSON.stringify(ours) === JSON.stringify(base)) return disk;
+  if (typeof ours === 'number' && typeof base === 'number' && typeof disk === 'number') return disk + (ours - base);
+  if ((top || (isMap(ours) && isMap(disk))) && isPlainObject(ours) && isPlainObject(base) && isPlainObject(disk)) {
+    const out = {};
+    for (const k of new Set([...Object.keys(disk), ...Object.keys(ours)])) {
+      // A key this process deleted stays deleted.
+      if (!(k in ours) && k in base) continue;
+      const v = merge(base[k], ours[k], disk[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  return ours;
+}
+
+// Make target equal to src, reusing target's nested objects so references a
+// caller holds (state.stats) stay live.
+function assignInPlace(target, src) {
+  for (const k of Object.keys(target)) if (!(k in src)) delete target[k];
+  for (const [k, v] of Object.entries(src)) {
+    if (isPlainObject(v) && isPlainObject(target[k])) assignInPlace(target[k], v);
+    else target[k] = v;
+  }
+}
+
+// A state from readState is merged with the file's current contents (see
+// merge) and then updated to the result, so writing it again later counts
+// only what changed since. A state built by hand is written as given.
 function writeState(state) {
-  fs.writeFileSync(dataFile('state.json'), JSON.stringify(state, null, 2));
+  const file = dataFile('state.json');
+  let out = state;
+  if (state[BASE] && fs.existsSync(file)) {
+    out = merge(state[BASE], clone(state), readStateFile(), true);
+    assignInPlace(state, out);
+  }
+  writeFileAtomic(file, JSON.stringify(out, null, 2));
+  if (state[BASE]) state[BASE] = clone(out);
+}
+
+// Route bookkeeping. Sessions run side by side, so each keeps its own route;
+// a single shared one let one session's prompt lift another's enforcement.
+const MAX_ROUTE_SESSIONS = 20;
+
+function putRoute(state, route) {
+  state.route = route;
+  if (!route.session) return;
+  const routes = { ...(state.routes || {}), [route.session]: route };
+  state.routes = Object.fromEntries(Object.entries(routes)
+    .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at)))
+    .slice(0, MAX_ROUTE_SESSIONS));
+}
+
+// The session's route, or the latest one when no session is given; null
+// when the session has none. Falls back to state.route for state written
+// before per-session routes.
+function routeFor(state, session) {
+  if (!state) return null;
+  if (!session) return state.route || null;
+  const own = state.routes && state.routes[session];
+  if (own) return own;
+  return state.route && state.route.session === session ? state.route : null;
 }
 
 // Per-project overrides in <project>/.claude/mynameisjev.json:
@@ -188,6 +293,7 @@ function projectDir(fallback) {
 }
 
 module.exports = {
-  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, DEFAULT_STATE, readState, writeState,
+  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, DEFAULT_STATE, readState, writeState,
+  putRoute, routeFor,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
 };

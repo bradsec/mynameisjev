@@ -138,7 +138,7 @@ function sharePromptCache(session, pc) {
     if (!v || !(now - v.at < PROMPT_CACHE_KEEP_MS)) delete all[id];
   }
   all[session] = { ...next, at: now };
-  try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
+  try { require('./jev-state').writeFileAtomic(file, JSON.stringify(all)); } catch (_) {}
 }
 
 // Hooks never receive the effort level either; the router compares it with
@@ -158,7 +158,7 @@ function shareEffort(session, level) {
     if (!v || !(now - v.at < PROMPT_CACHE_KEEP_MS)) delete all[id];
   }
   all[session] = { level, at: now };
-  try { fs.writeFileSync(file, JSON.stringify(all)); } catch (_) {}
+  try { require('./jev-state').writeFileAtomic(file, JSON.stringify(all)); } catch (_) {}
 }
 
 // Hooks never receive rate_limits, so share them with the Jev router
@@ -181,7 +181,7 @@ function shareLimits(fiveHour, sevenDay) {
     ? require('./jev-pace').recordSample(prev?.history, limits.five_hour, now)
     : [];
   const saved = { at: now, ...limits, history };
-  try { fs.writeFileSync(limitsPath, JSON.stringify(saved)); } catch (_) {}
+  try { require('./jev-state').writeFileAtomic(limitsPath, JSON.stringify(saved)); } catch (_) {}
   return saved;
 }
 
@@ -250,7 +250,7 @@ function runWrapped(input, data, state) {
     out = mutedGray(`mynameisjev: your status line command failed (${why})`);
   }
   if (state.statusLineJev) {
-    const jev = jevSegment(state, data.workspace?.project_dir || data.workspace?.current_dir || data.cwd);
+    const jev = jevSegment(state, data.workspace?.project_dir || data.workspace?.current_dir || data.cwd, data.session_id);
     if (jev) out = out ? `${out}\n${jev}` : jev;
   }
   process.stdout.write(out);
@@ -275,8 +275,9 @@ function fitLine(layouts) {
 // Whether the router is on and its OpenRouter access works. "Works" comes from
 // the outcome of the router's last Jev call (state.lastCall), so rendering
 // never calls the API. Returns '' when the Jev state can't be read.
-// projectDir is checked for a .claude/mynameisjev.json override.
-function jevSegment(state, projectDir) {
+// projectDir is checked for a .claude/mynameisjev.json override; the route
+// shown is session's own.
+function jevSegment(state, projectDir, session) {
   if (!state) return '';
   let project;
   try {
@@ -289,7 +290,7 @@ function jevSegment(state, projectDir) {
   if (project && project.error) return `${label} ${red('project config error')}`;
   const prefer = (project && project.prefer) || state.prefer;
   // Prefer-Codex mode is a standing choice, so it stays visible.
-  const route = (prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(state.route);
+  const route = (prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(require('./jev-state').routeFor(state, session));
   if (project && !project.router) return `${label} ${mutedGray('off in project')}${route}`;
   if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
   const last = state.lastCall;
@@ -299,7 +300,7 @@ function jevSegment(state, projectDir) {
 }
 
 // Where Jev sent the latest message: " → opus" (grey, the session's own
-// model), " → codex gpt-6-sol?" (amber, suggested) or " → sonnet ✓" (green,
+// model), " → codex gpt-6.1-sol?" (amber, suggested) or " → sonnet ✓" (green,
 // the hand-off ran). Hidden once older than 30 minutes.
 function routeSuffix(route) {
   if (!route || Date.now() - Date.parse(route.at) > 30 * 60 * 1000) return '';
@@ -636,7 +637,7 @@ process.stdin.on('end', () => {
           .join(dotSep)
       : null;
 
-    const jevPart = jevSegment(state, data.workspace?.project_dir || dir) || null;
+    const jevPart = jevSegment(state, data.workspace?.project_dir || dir, session) || null;
     const line1For = ({ account, bars, resets }) => {
       const leftParts = [account ? acctPart : null, softBlue(model) + effort, jevPart]
         .filter(Boolean).join(sep);

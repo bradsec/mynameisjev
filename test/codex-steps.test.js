@@ -28,3 +28,9 @@ test('leaves the edit alone otherwise', () => {
   assert.strictEqual(guard(call(), state({ route: route({ at: new Date(now - 2 * 3600000).toISOString() }) }), now, companion), null, 'stale');
   assert.strictEqual(guard(call({ tool_name: 'Bash' }), state(), now, companion), null, 'not an edit tool');
 });
+
+test('another session\'s newer route does not lift this session\'s guard', () => {
+  const theirs = route({ session: 's2', target: 'claude', model: 'opus', how: 'session' });
+  const out = guard(call(), state({ route: theirs, routes: { s1: route(), s2: theirs } }), now, companion);
+  assert.strictEqual(out.hookSpecificOutput.permissionDecision, 'deny');
+});

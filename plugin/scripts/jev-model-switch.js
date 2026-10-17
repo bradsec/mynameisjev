@@ -39,7 +39,7 @@ process.stdin.on('end', () => {
     const kept = Object.entries(models)
       .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at)))
       .slice(0, MAX_SESSIONS);
-    fs.writeFileSync(modelsPath, JSON.stringify(Object.fromEntries(kept), null, 2));
+    st.writeFileAtomic(modelsPath, JSON.stringify(Object.fromEntries(kept), null, 2));
   } catch (e) {
     // Silent fail: the router falls back to the transcript.
   }

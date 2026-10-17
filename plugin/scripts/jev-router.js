@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// jev-router — UserPromptSubmit hook. Asks Jev (typesafe/jev-1.13 via OpenRouter)
+// jev-router — UserPromptSubmit hook. Asks Jev (typesafe/jev-1.14 via OpenRouter)
 // how big each message is, and leaves a note for Claude when a pinned helper
 // agent (mynameisjev:tiny/everyday/large) would help: a cheaper model than the
 // session's, a stronger one, or the same model keeping bulky output out of the
@@ -103,9 +103,9 @@ function recordSilent(state, counter, reason) {
 
 // Tier -> the plugin's pinned helper agent (agents/*.md, namespaced by the
 // plugin as mynameisjev:<name>), its model and its reasoning effort. Large
-// and hardest share a model and differ in effort; Haiku takes no effort.
+// and hardest share a model and differ in effort.
 const TIER_INFO = {
-  tiny: { agent: 'mynameisjev:tiny', model: 'haiku', effort: null },
+  tiny: { agent: 'mynameisjev:tiny', model: 'haiku', effort: 'low' },
   everyday: { agent: 'mynameisjev:everyday', model: 'sonnet', effort: 'medium' },
   large: { agent: 'mynameisjev:large', model: 'opus', effort: 'high' },
   hardest: { agent: 'mynameisjev:hardest', model: 'opus', effort: 'xhigh' },
@@ -365,7 +365,7 @@ function codexStatus(cache) {
 // session scopes the hand-off enforcement (jev-agent-model.js) to the
 // conversation the suggestion was made in.
 function setRoute(state, target, model, how, session) {
-  state.route = { at: new Date().toISOString(), target, model: model || 'claude', how, session: session || null };
+  st.putRoute(state, { at: new Date().toISOString(), target, model: model || 'claude', how, session: session || null });
 }
 
 // Choose between Codex, a Claude helper, and no note. Codex takes
@@ -849,10 +849,11 @@ function main() {
       }
 
       const tier = TIER_INFO[result.size] ? result.size : null;
-      if (!tier || result.confidence < 0.6) {
-        recordSilent(state, 'unsure', !tier
-          ? `unknown size "${result.size}"`
-          : `${tier} at confidence ${Number(result.confidence).toFixed(2)} (< 0.60)`);
+      const confident = Number.isFinite(result.confidence);
+      if (!tier || !confident || result.confidence < 0.6) {
+        recordSilent(state, 'unsure', !tier ? `unknown size "${result.size}"`
+          : !confident ? `${tier} with no confidence`
+            : `${tier} at confidence ${result.confidence.toFixed(2)} (< 0.60)`);
         // Unsized work still runs on Claude; with Claude low, point its
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();

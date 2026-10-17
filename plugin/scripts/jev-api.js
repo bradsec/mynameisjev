@@ -3,7 +3,7 @@
 // redact what they put in `state` and `questions` (jev-redact.js).
 
 const ENDPOINT = 'https://openrouter.ai/api/alpha/decisions';
-const MODEL = 'typesafe/jev-1.13';
+const MODEL = 'typesafe/jev-1.14';
 
 // Returns the parsed response ({ answers, usage }). Throws on a non-2xx
 // status or a body that is not JSON; a timeout throws fetch's AbortError

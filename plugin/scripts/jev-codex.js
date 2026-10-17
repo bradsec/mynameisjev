@@ -30,7 +30,7 @@ const LOCK_MAX_AGE_MS = 30 * 1000;
 // companion's `task --effort` accepts (none..xhigh).
 const DEFAULT_TIERS = {
   tiny: { model: 'gpt-6-luna', effort: 'low' },
-  everyday: { model: 'gpt-6-sol', effort: 'medium' },
+  everyday: { model: 'gpt-6.1-sol', effort: 'medium' },
   large: { model: 'gpt-6-astra', effort: 'medium' },
   hardest: { model: 'gpt-6-astra', effort: 'high' },
 };
@@ -137,7 +137,7 @@ function codexAvailable() {
 
 async function refreshCache() {
   const record = await queryAppServer();
-  fs.writeFileSync(cachePath, JSON.stringify(record, null, 2));
+  st.writeFileAtomic(cachePath, JSON.stringify(record, null, 2));
   return record;
 }
 
@@ -209,7 +209,7 @@ if (require.main === module && process.argv[2] === 'refresh') {
     .catch((e) => {
       // Record the failure (e.g. Codex not logged in) so readers can say why
       // there is no usage data; it is retried once the record goes stale.
-      try { fs.writeFileSync(cachePath, JSON.stringify({ at: Date.now(), error: e.message })); } catch (err) { /* ignore */ }
+      try { st.writeFileAtomic(cachePath, JSON.stringify({ at: Date.now(), error: e.message })); } catch (err) { /* ignore */ }
     })
     .finally(() => {
       try { fs.unlinkSync(lockPath); } catch (e) { /* already gone */ }
