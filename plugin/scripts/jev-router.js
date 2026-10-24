@@ -364,8 +364,8 @@ function codexStatus(cache) {
 // jev-usage-watch.js upgrades a suggestion to how: 'ran' when it runs.
 // session scopes the hand-off enforcement (jev-agent-model.js) to the
 // conversation the suggestion was made in.
-function setRoute(state, target, model, how, session) {
-  st.putRoute(state, { at: new Date().toISOString(), target, model: model || 'claude', how, session: session || null });
+function setRoute(state, target, model, how, session, effort) {
+  st.putRoute(state, { at: new Date().toISOString(), target, model: model || 'claude', how, session: session || null, ...(effort ? { effort } : {}) });
 }
 
 // Choose between Codex, a Claude helper, and no note. Codex takes
@@ -399,7 +399,7 @@ function routeAdvice(tier, result, ctx) {
   }
 
   const advice = delegationAdvice(tier, result, ctx.sessionFamily);
-  return typeof advice === 'string' ? { note: advice, codex: false, model: TIER_INFO[tier].model } : advice;
+  return typeof advice === 'string' ? { note: advice, codex: false, model: TIER_INFO[tier].model, effort: TIER_INFO[tier].effort } : advice;
 }
 
 // Note for Claude when its plan usage is high but the message can't go to
@@ -534,7 +534,7 @@ function parseOverride(prompt) {
 }
 
 // Note and route for an override. Returns { note, route: [target, model, how],
-// notice? } (route as in setRoute); notice goes to the user when Codex was
+// effort?, notice? } (route and effort as in setRoute); notice goes to the user when Codex was
 // asked for but may not run.
 function overrideAdvice(o, ctx) {
   const prefix = `The "${o.token}" prefix on this message is a Jev routing override from the user, not part of the task. `;
@@ -547,6 +547,7 @@ function overrideAdvice(o, ctx) {
       note: `${prefix}The user wants it done by the "${info.agent}" subagent (${helperLabel(info)}). Delegate it without asking, ` +
         'with a self-contained prompt that carries any context it needs from this conversation.',
       route: ['claude', info.model, 'suggested'],
+      effort: info.effort,
     };
   }
   const companion = codex.companionPath();
@@ -557,7 +558,7 @@ function overrideAdvice(o, ctx) {
       notice: 'Jev: "+codex" ignored: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH).',
     };
   }
-  const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache);
+  const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache, true);
   return {
     note: `${prefix}Route it to Codex ${codexCall(choice, companion)}`,
     route: ['codex', choice.model || 'default', 'suggested'],
@@ -794,7 +795,7 @@ function main() {
       if (override) {
         const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers });
         state.stats.forced += 1;
-        setRoute(state, ...o.route, sessionId);
+        setRoute(state, ...o.route, sessionId, o.effort);
         state.lastSilent = null;
         writeState(state);
         if (o.notice) notices.push(o.notice);
@@ -887,7 +888,7 @@ function main() {
         if (advice.note) {
           if (advice.codex) state.stats.codex += 1;
           else state.stats.helper += 1;
-          setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested', sessionId);
+          setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested', sessionId, advice.effort);
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };
         } else {

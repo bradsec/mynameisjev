@@ -21,20 +21,21 @@ function transcriptPath(hookInput) {
 
 // Token use per model family in a transcript. Claude Code writes one entry
 // per content block of a reply, each repeating the reply's usage, so replies
-// are counted once by message id.
+// are counted once by message id. The last entry wins: before Claude Code
+// 2.1.307 the first entry of a streamed reply held placeholder usage.
 function tokenUse(text) {
-  const seen = new Set();
-  const byModel = {};
+  const replies = new Map();
+  let unnamed = 0;
   for (const line of text.split('\n')) {
     if (!line.includes('"usage"')) continue;
     let entry;
     try { entry = JSON.parse(line); } catch (e) { continue; }
     const msg = entry.message;
     if (entry.type !== 'assistant' || !msg || !msg.usage) continue;
-    if (msg.id) {
-      if (seen.has(msg.id)) continue;
-      seen.add(msg.id);
-    }
+    replies.set(msg.id || `#${unnamed++}`, msg);
+  }
+  const byModel = {};
+  for (const msg of replies.values()) {
     const family = MODEL_FAMILIES.find((f) => typeof msg.model === 'string' && msg.model.includes(f));
     if (!family) continue;
     const u = msg.usage;

@@ -19,9 +19,10 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
   only suggests a helper (`mynameisjev:tiny` on Haiku at low effort,
   `:everyday` on Sonnet at medium effort, `:large` on Opus at high effort,
   `:hardest` on Opus at extra-high effort) when it is cheaper, stronger, or
-  keeps bulky output out of your main context. Tiny jobs and jobs that need
-  the conversation stay put. `/mynameisjev:enforce on` makes general-purpose
-  subagents use the suggested model.
+  keeps bulky output out of your main context. Jev never suggests Fable;
+  it runs only when you pick it, for example with `/model`. Tiny jobs and
+  jobs that need the conversation stay put. `/mynameisjev:enforce on` makes
+  general-purpose subagents use the suggested model.
 - **Topic-shift notices.** Tells you when a message starts an unrelated task,
   so you can `/clear` instead of paying for stale context.
   `/mynameisjev:handoff` saves a note of the old task first.
@@ -331,7 +332,9 @@ digest from the transcript just before it runs and hands it to Claude right
 after (a `SessionStart` hook with source `compact`): your latest 3 requests,
 the files edited or written since the previous compaction, and the end of
 Claude's last reply. It is built locally from the transcript; nothing is
-sent anywhere.
+sent anywhere. A compaction also clears the session's cold-cache record, so
+the cold-cache guard does not block the next message over the old context's
+size, including after Claude Code's idle compaction.
 
 ### Overrides
 
@@ -353,12 +356,16 @@ through its `codex:codex-rescue` agent, which itself runs on Claude.
 
 Default Codex models per size (change with `/mynameisjev:codex set`):
 
-| Size | Codex model | Effort |
-| --- | --- | --- |
-| tiny | `gpt-6-luna` | low |
-| everyday | `gpt-6.1-sol` | medium |
-| large | `gpt-6-astra` | medium |
-| hardest | `gpt-6-astra` | high |
+| Size | Codex model | With `+codex:<size>` | Effort |
+| --- | --- | --- | --- |
+| tiny | `gpt-6-luna` | `gpt-6-luna` | low |
+| everyday | `gpt-6.1-sol` | `gpt-6.1-sol` | medium |
+| large | `gpt-6.1-sol` | `gpt-6-astra` | medium |
+| hardest | `gpt-6.1-sol` | `gpt-6-astra` | high |
+
+`gpt-6-astra` uses Codex quota fastest, so Jev picks it only when you ask:
+a `+codex:large` or `+codex:hardest` prefix, or a tier set to it with
+`/mynameisjev:codex set`.
 
 Models missing from your Codex account's list fall back to Codex's default.
 
@@ -456,7 +463,7 @@ All off by default, because each one changes things outside the plugin.
 | --- | --- | --- |
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
 | Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
-| Enforce hand-offs | `/mynameisjev:enforce on` | When Jev suggested a Claude helper for the message, a general-purpose subagent that Claude starts without choosing a model runs on that helper's model (effort can't be set this way; the `mynameisjev:*` helpers carry theirs). Named agents, calls that choose a model, Codex routes and other sessions are left alone, and permission prompts are unchanged. When the message is routed to Codex (the whole task, or `→ codex steps` near the limit), Claude's own Edit, Write and NotebookEdit calls are denied with the Codex companion command, so edits use Codex's quota. Edits through Bash are not blocked; the note tells Claude not to make them. Send `+claude` to lift it for a message |
+| Enforce hand-offs | `/mynameisjev:enforce on` | When Jev suggested a Claude helper for the message, a general-purpose subagent that Claude starts without choosing a model runs on that helper's model and effort (an effort Claude chose stays). Named agents, calls that choose a model, Codex routes and other sessions are left alone, and permission prompts are unchanged. When the message is routed to Codex (the whole task, or `→ codex steps` near the limit), Claude's own Edit, Write and NotebookEdit calls are denied with the Codex companion command, so edits use Codex's quota. Edits through Bash are not blocked; the note tells Claude not to make them. Send `+claude` to lift it for a message |
 | Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
 | Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Jev's status line shows `guard armed` next to the cold cache when the next message would be blocked. Needs the status line, which records the cache state |
 | Completeness check | `/mynameisjev:check on` | When Claude finishes a turn, Jev checks that the final reply covers every part of your request: each list item, or each sentence when there is no list, gets a yes/no question. If a part looks missed (and Claude is not waiting on you), Claude continues once with those parts quoted, to finish them or say why they were skipped. It never blocks twice in a turn, and a failed Jev call never blocks. Jev also sees the files Claude edited this turn (with Edit, Write or NotebookEdit), so finished work counts even when the reply does not mention it, and each edited file gets a yes/no on whether the request needed it; files that look unrelated are quoted so Claude reverts them or says why. Edits made through Bash or by Codex are not seen. Adds about 1 to 3 seconds and $0.00003 per turn; `/mynameisjev:status` shows how often it continued |

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.17
+
+- Automatic Codex routing no longer uses `gpt-6-astra`: large and hardest
+  work goes to the everyday model (`gpt-6.1-sol`) at the tier's own effort.
+  `+codex:large`, `+codex:hardest` and tiers set with `/mynameisjev:codex set`
+  still use the model asked for. `/mynameisjev:codex show` lists both.
+- Jev never suggests Fable; a test now guards this.
+- `/mynameisjev:report` counts each helper reply's last recorded usage.
+  Before Claude Code 2.1.307 the first entry of a streamed subagent reply
+  held placeholder usage, so helper token totals read low.
+- A compaction clears the session's cold-cache record, so the cold-cache
+  guard no longer blocks the next message over the pre-compaction size when
+  the status line has not redrawn (for example after an idle compaction).
+- With `/mynameisjev:enforce on`, a general-purpose subagent also gets the
+  suggested helper's effort, using the Agent tool's `effort` parameter. An
+  effort Claude chose stays.
+
 ## 0.3.16
 
 - Sizing uses Jev 1.14 (`typesafe/jev-1.14`), at the same price as 1.13.

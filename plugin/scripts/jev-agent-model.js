@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // jev-agent-model — PreToolUse hook for Agent calls. With enforcement on
 // (`/mynameisjev:enforce on`), a general-purpose subagent that Claude starts
-// without choosing a model runs on the Claude helper model Jev suggested for
-// the current message (state.route), so the saving no longer depends on
+// without choosing a model runs on the Claude helper model and effort Jev
+// suggested for the current message (state.route); an effort Claude chose
+// stays, so the saving no longer depends on
 // Claude following the note.
 //
 // Left alone: calls that name a model, named agents (they carry their own
@@ -29,11 +30,12 @@ function enforce(hookInput, state, nowMs) {
   if (!route || route.target !== 'claude' || route.how !== 'suggested' || !HELPER_MODELS.has(route.model)) return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
   if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;
+  const effort = input.effort || route.effort;
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      updatedInput: { ...input, model: route.model },
-      additionalContext: `Jev ran this subagent on ${route.model}, the Claude helper model it suggested for this message (/mynameisjev:enforce off stops this).`,
+      updatedInput: { ...input, model: route.model, ...(effort ? { effort } : {}) },
+      additionalContext: `Jev ran this subagent on ${route.model}${effort ? `, ${effort} effort` : ''}, the Claude helper model it suggested for this message (/mynameisjev:enforce off stops this).`,
     },
   };
 }

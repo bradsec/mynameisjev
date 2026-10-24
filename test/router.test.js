@@ -169,6 +169,7 @@ test('override: tier and claude notes', () => {
   const tier = router.overrideAdvice(router.parseOverride('+tiny rename x'), ctx());
   assert.match(tier.note, /"mynameisjev:tiny" subagent \(haiku, low effort\)\. Delegate it without asking/);
   assert.deepStrictEqual(tier.route, ['claude', 'haiku', 'suggested']);
+  assert.strictEqual(tier.effort, 'low');
   const here = router.overrideAdvice(router.parseOverride('+claude do it'), ctx());
   assert.match(here.note, /Handle this message here/);
   assert.deepStrictEqual(here.route, ['claude', 'opus', 'session']);
@@ -208,6 +209,15 @@ test('model streak: suggests a stronger model after 3 larger messages', () => {
   r = router.modelStreak(r.streak, 's', 'sonnet', 'hardest');
   r = router.modelStreak(r.streak, 's', 'sonnet', 'large');
   assert.match(r.notice, /sized for opus, but this session runs sonnet\. \/model opus may give better results/);
+});
+
+test('model streak and helpers never suggest fable', () => {
+  let r = { streak: null };
+  for (let i = 0; i < 10; i++) {
+    r = router.modelStreak(r.streak, 's', 'haiku', 'hardest');
+    if (r.notice) assert.doesNotMatch(r.notice, /fable/);
+  }
+  for (const info of Object.values(router.TIER_INFO)) assert.notStrictEqual(info.model, 'fable');
 });
 
 test('model streak: a same-size message, another session or a model switch starts over', () => {

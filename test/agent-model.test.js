@@ -16,6 +16,14 @@ test('sets the suggested model on a general-purpose subagent, keeping the rest o
   }
 });
 
+test('sets the suggested effort too, unless Claude chose one', () => {
+  const out = enforce(call(), state({ route: route({ model: 'opus', effort: 'xhigh' }) }), now);
+  assert.deepStrictEqual(out.hookSpecificOutput.updatedInput, { description: 'd', prompt: 'p', model: 'opus', effort: 'xhigh' });
+  assert.match(out.hookSpecificOutput.additionalContext, /on opus, xhigh effort/);
+  const own = enforce(call({ effort: 'low' }), state({ route: route({ model: 'opus', effort: 'xhigh' }) }), now);
+  assert.strictEqual(own.hookSpecificOutput.updatedInput.effort, 'low');
+});
+
 test('leaves the call alone otherwise', () => {
   assert.strictEqual(enforce(call(), state({ enforce: false }), now), null, 'off');
   assert.strictEqual(enforce(call(), state({ enabled: false }), now), null, 'router off');

@@ -110,6 +110,24 @@ function save(hookInput) {
   const file = digestPath(hookInput.session_id);
   if (digest) fs.writeFileSync(file, JSON.stringify({ at: Date.now(), digest }));
   else fs.rmSync(file, { force: true });
+  forgetPromptCache(hookInput.session_id);
+}
+
+// The status line's cold-cache record (cc-statusline.js) describes the
+// context before compaction. An idle compaction can run with no status line
+// redraw after it, and the stale record would make the router's cold-cache
+// guard block the next prompt, so drop it until the next reply records one.
+function forgetPromptCache(sessionId) {
+  const file = st.dataFile('prompt-cache.json');
+  let all;
+  try {
+    all = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return;
+  }
+  if (!all || !all[sessionId]) return;
+  delete all[sessionId];
+  st.writeFileAtomic(file, JSON.stringify(all));
 }
 
 // Output for the SessionStart hook, or null.

@@ -32,10 +32,19 @@ test('Codex is unavailable without the codex plugin', () => {
 test('tier choice: defaults, overrides, unknown models dropped', () => {
   const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6-luna' }] };
   assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-6-luna', effort: 'low' });
-  assert.deepStrictEqual(codex.tierChoice('large', { large: { effort: 'high' } }, cache), { model: 'gpt-6-astra', effort: 'high' });
+  assert.deepStrictEqual(codex.tierChoice('large', { large: { effort: 'high' } }, cache, true), { model: 'gpt-6-astra', effort: 'high' });
   assert.strictEqual(codex.tierChoice('everyday', {}, cache).model, null, 'gpt-6.1-sol is not in this list');
   assert.strictEqual(codex.DEFAULT_TIERS.everyday.model, 'gpt-6.1-sol');
   assert.strictEqual(codex.tierChoice('tiny', { tiny: { effort: 'max' } }, cache).effort, null, 'task effort must be none..xhigh');
+});
+
+test('tier choice: unasked routing stays off gpt-6-astra unless the user picked it', () => {
+  const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6.1-sol' }] };
+  assert.deepStrictEqual(codex.tierChoice('large', {}, cache), { model: 'gpt-6.1-sol', effort: 'medium' });
+  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache), { model: 'gpt-6.1-sol', effort: 'high' });
+  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache, true), { model: 'gpt-6-astra', effort: 'high' });
+  assert.strictEqual(codex.tierChoice('large', { large: { model: 'gpt-6-astra' } }, cache).model, 'gpt-6-astra', 'set with /mynameisjev:codex set');
+  assert.strictEqual(codex.tierChoice('large', { everyday: { model: 'gpt-6-luna' } }, cache).model, null, 'falls back to the everyday choice, here unlisted');
 });
 
 test('codex peak: highest window, reset windows count as 0', () => {

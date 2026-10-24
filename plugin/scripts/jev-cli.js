@@ -239,7 +239,9 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
   console.log('Codex model per Jev size:');
   for (const t of Object.keys(codex.DEFAULT_TIERS)) {
     const c = codex.tierChoice(t, state.codexTiers, cache);
-    console.log(`  ${t.padEnd(9)}${c.model || 'Codex default'}, effort ${c.effort || 'default'}${state.codexTiers[t] ? ' (custom)' : ''}`);
+    const asked = codex.tierChoice(t, state.codexTiers, cache, true);
+    const prefix = asked.model !== c.model ? ` (+codex:${t}: ${asked.model || 'Codex default'})` : '';
+    console.log(`  ${t.padEnd(9)}${c.model || 'Codex default'}, effort ${c.effort || 'default'}${state.codexTiers[t] ? ' (custom)' : ''}${prefix}`);
   }
   console.log('Available Codex models:');
   for (const m of cache.models) console.log(`  ${m.id}${m.isDefault ? ' (default)' : ''}: ${m.description}`);

@@ -35,6 +35,9 @@ const DEFAULT_TIERS = {
   hardest: { model: 'gpt-6-astra', effort: 'high' },
 };
 const TASK_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+// Models that draw down Codex usage fastest. Jev routes to them only when the
+// user asks: a +codex prefix, or a tier set with /mynameisjev:codex set.
+const PREMIUM_MODELS = new Set(['gpt-6-astra']);
 
 function readJson(file) {
   try {
@@ -183,8 +186,15 @@ function codexPeak(cache) {
 // Model + effort for a tier: user override (state.codexTiers) first, then the
 // defaults. A model missing from Codex's current list is dropped so Codex
 // uses its own default instead of failing on an unknown model.
-function tierChoice(tier, overrides, cache) {
-  const choice = { ...DEFAULT_TIERS[tier], ...((overrides && overrides[tier]) || {}) };
+// explicit: the user asked for this tier, so its premium default stands.
+// Otherwise a premium default model gives way to the everyday tier's model,
+// keeping this tier's effort.
+function tierChoice(tier, overrides, cache, explicit = false) {
+  const override = (overrides && overrides[tier]) || {};
+  const choice = { ...DEFAULT_TIERS[tier], ...override };
+  if (!explicit && !override.model && PREMIUM_MODELS.has(choice.model) && tier !== 'everyday') {
+    choice.model = { ...DEFAULT_TIERS.everyday, ...((overrides && overrides.everyday) || {}) }.model;
+  }
   const listed = cache && Array.isArray(cache.models) ? cache.models.map((m) => m.id) : null;
   if (listed && listed.length > 0 && !listed.includes(choice.model)) choice.model = null;
   if (!TASK_EFFORTS.includes(choice.effort)) choice.effort = null;
@@ -195,6 +205,7 @@ module.exports = {
   codexAvailable,
   DEFAULT_TIERS,
   TASK_EFFORTS,
+  PREMIUM_MODELS,
   CACHE_MAX_AGE_MS,
   companionPath,
   readCache,

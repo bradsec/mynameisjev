@@ -60,6 +60,16 @@ test('save then restore hands the digest over once, only on compact', () => {
   assert.strictEqual(compact.restore({ session_id: 's1', source: 'compact' }), null, 'used once');
 });
 
+test('save drops the session\'s stale cold-cache record', () => {
+  fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true }));
+  const cacheFile = path.join(dataDir, 'prompt-cache.json');
+  fs.writeFileSync(cacheFile, JSON.stringify({ s3: { expires_at: 1, recache: 250000 }, other: { expires_at: 2, recache: 9 } }));
+  const file = path.join(tmp, 't.jsonl');
+  fs.writeFileSync(file, transcript);
+  compact.save({ session_id: 's3', transcript_path: file });
+  assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(cacheFile, 'utf8'))), ['other']);
+});
+
 test('does nothing with the router off', () => {
   fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: false }));
   const file = path.join(tmp, 't.jsonl');

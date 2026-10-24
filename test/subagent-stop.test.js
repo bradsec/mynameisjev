@@ -25,6 +25,14 @@ test('adds up usage per model, once per reply', () => {
   assert.deepStrictEqual(stop.tokenUse(text), { sonnet: { input: 3, cacheWrite: 100, cacheRead: 2100, output: 70 } });
 });
 
+test('a reply logged more than once counts its last usage, not a streaming placeholder', () => {
+  const text = [
+    entry('m1', 'claude-opus-5-5', u(1, 0, 0, 1)),
+    entry('m1', 'claude-opus-5-5', u(4, 200, 3000, 90)),
+  ].join('\n');
+  assert.deepStrictEqual(stop.tokenUse(text), { opus: { input: 4, cacheWrite: 200, cacheRead: 3000, output: 90 } });
+});
+
 test('derives the subagent transcript path', () => {
   assert.strictEqual(
     stop.transcriptPath({ transcript_path: '/p/s1.jsonl', session_id: 's1', agent_id: 'a9' }),
