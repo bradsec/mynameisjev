@@ -155,6 +155,67 @@ test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () =
   assert.strictEqual(router.routeAdvice('everyday', result(), ctx({ codexNow: codexBusy, preferCodex: true })).codex, false);
 });
 
+test('codex notes: Claude writes the brief, has the final say, and reviews when on', () => {
+  const on = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true }));
+  assert.match(on.note, /senior developer with the final say/);
+  assert.match(on.note, /Goal; Context .*Done when; Verify with/);
+  assert.match(on.note, /"<the brief>"/);
+  assert.match(on.note, /token-efficiently/);
+  assert.match(on.note, /ponytail .*superpowers .*if installed/);
+  assert.match(on.note, /saves tokens without lowering the quality/);
+  assert.match(on.note, /git diff --stat/);
+  assert.match(on.note, /explicitly asks you \(Claude\) to do the work yourself, do it here/);
+  const off = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: false }));
+  assert.match(off.note, /final say/);
+  assert.doesNotMatch(off.note, /git diff --stat/);
+});
+
+test('codex notes: tell Codex to use rtk only when it is installed', () => {
+  const note = () => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true })).note;
+  const savedPath = process.env.PATH;
+  const bin = fs.mkdtempSync(path.join(tmp, 'bin-'));
+  try {
+    process.env.PATH = bin;
+    assert.doesNotMatch(note(), /rtk/);
+    const name = process.platform === 'win32' ? 'rtk.exe' : 'rtk';
+    fs.writeFileSync(path.join(bin, name), '');
+    assert.match(note(), /prefix its shell commands with rtk/);
+  } finally {
+    process.env.PATH = savedPath;
+  }
+});
+
+test('codex notes: sub-step note allows review fixes only with review on', () => {
+  const steps = (review) => router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review })).note;
+  assert.match(steps(true), /exception is small fixes while reviewing/);
+  assert.match(steps(true), /final say/);
+  assert.match(steps(true), /do it here instead/);
+  assert.doesNotMatch(steps(false), /small fixes/);
+  assert.match(steps(false), /Do not make edits yourself/);
+});
+
+test('codex notes: full guidance once per session, then a short pointer', () => {
+  const note = (over) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true, ...over })).note;
+  const short = note({ guided: true });
+  assert.match(short, /As in Jev's first Codex note this session/);
+  assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
+  assert.match(short, /review its result and fix small issues yourself/);
+  assert.doesNotMatch(short, /git diff --stat|ponytail/);
+  assert.ok(short.length < note({ guided: false }).length - 400);
+  const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
+  assert.match(steps, /As in Jev's first Codex note/);
+  assert.doesNotMatch(steps, /git diff --stat/);
+});
+
+test('route: a message asking Claude itself to do it gets no hand-off', () => {
+  for (const over of [{ coding: 0.9 }, { contained: 0.1 }]) {
+    const r = router.routeAdvice('large', result({ size: 'large', self: 0.9, ...over }), ctx({ codexNow: codexOk, preferCodex: true }));
+    assert.match(r.suppress, /asked Claude/);
+  }
+  assert.ok(router.routeAdvice('everyday', result({ coding: 0.9, self: 0.1 }), ctx({ codexNow: codexOk })).codex);
+  assert.ok(!router.askedClaude(result({ self: null })));
+});
+
 test('override: parses "+" prefixes, not look-alikes', () => {
   assert.deepStrictEqual(router.parseOverride('+large build the parser'), { target: 'tier', tier: 'large', token: '+large' });
   assert.deepStrictEqual(router.parseOverride('+codex fix it'), { target: 'codex', tier: 'everyday', token: '+codex' });

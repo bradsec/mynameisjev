@@ -40,6 +40,37 @@ test('records hand-offs that ran, even below the usage thresholds', async () => 
   assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
 });
 
+test('marks when Codex\'s result is back for review fixes', async () => {
+  setState({});
+  setUsage(10);
+  const read = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).routes.s;
+  await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task --write "x"' } });
+  assert.strictEqual(read().reviewing, true, 'foreground task returned its result');
+  await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" task --background --write "x"' } });
+  assert.strictEqual(read().reviewing, false, 'background task still running');
+  await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" status' } });
+  assert.strictEqual(read().reviewing, false);
+  await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" result job-1' } });
+  assert.strictEqual(read().reviewing, true, 'result read back');
+});
+
+test('review: an unfinished result keeps the guard; counts returns, fixes and send-backs', async () => {
+  setState({});
+  setUsage(10);
+  const read = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
+  const bash = (command, tool_response) => watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command }, tool_response });
+  await bash('node "/p/codex-companion.mjs" task --background --write "x"');
+  await bash('node "/p/codex-companion.mjs" result job-1', { stdout: '', stderr: 'Job job-1 is still running. Check /codex:status and try again once it finishes.' });
+  assert.strictEqual(read().routes.s.reviewing, false, 'still running');
+  await bash('node "/p/codex-companion.mjs" result job-1', { stdout: 'done' });
+  assert.strictEqual(read().routes.s.reviewing, true);
+  await watcher.watch({ session_id: 's', tool_name: 'Edit', tool_input: { file_path: 'a.js' } });
+  await watcher.watch({ session_id: 's', tool_name: 'Edit', tool_input: { file_path: 'b.js' } });
+  await bash('node "/p/codex-companion.mjs" task --write "follow-up"');
+  const stats = read().stats;
+  assert.deepStrictEqual([stats.codexReturns, stats.reviewFixes, stats.reviewSendBacks], [2, 1, 1], 'two results back, one fixed, one sent back');
+});
+
 test('fast path exits only below every threshold, including the pace', () => {
   assert.strictEqual(watcher.FAST_PATH_PCT, require('../plugin/scripts/jev-pace').PACE_ROUTE_MIN_PCT);
   assert.ok(watcher.FAST_PATH_PCT <= router.THRESHOLDS.route);

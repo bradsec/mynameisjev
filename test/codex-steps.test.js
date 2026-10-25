@@ -34,3 +34,13 @@ test('another session\'s newer route does not lift this session\'s guard', () =>
   const out = guard(call(), state({ route: theirs, routes: { s1: route(), s2: theirs } }), now, companion);
   assert.strictEqual(out.hookSpecificOutput.permissionDecision, 'deny');
 });
+
+test('with review on, edits open once Codex\'s result is back', () => {
+  const back = route({ model: 'gpt-6-sol', how: 'ran', reviewing: true });
+  assert.strictEqual(guard(call(), state({ route: back }), now, companion), null, 'review is on by default');
+  assert.strictEqual(guard(call(), state({ route: back, review: false }), now, companion).hookSpecificOutput.permissionDecision, 'deny', 'review off');
+  assert.strictEqual(guard(call(), state({ route: back, sessions: { s1: { review: false } } }), now, companion).hookSpecificOutput.permissionDecision, 'deny', 'review off for this session');
+  const running = guard(call(), state({ route: route({ how: 'ran', reviewing: false }) }), now, companion);
+  assert.strictEqual(running.hookSpecificOutput.permissionDecision, 'deny', 'Codex still running');
+  assert.match(running.hookSpecificOutput.permissionDecisionReason, /\+claude/);
+});

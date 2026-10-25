@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.19
+
+- Claude leads Codex hand-offs as the senior developer with the final say.
+  Every Codex note tells Claude to write Codex a brief (goal, context,
+  constraints, done when, verify with) instead of passing the message
+  through, and to do the work itself when the user asks it to directly.
+  The brief asks Codex to work token-efficiently and use its installed
+  skills (ponytail, superpowers, and any that save tokens without lowering
+  quality) where they fit; Claude uses its own the same way.
+  With the `rtk` CLI on `PATH`, the brief tells Codex to prefix its shell
+  commands with `rtk`.
+- Review of Codex work, on by default: Claude reads the diff, runs the
+  smallest relevant check, fixes small issues itself and sends larger ones
+  back to Codex. `/mynameisjev:review on | off` sets it per session,
+  `--default` for new sessions. With `/mynameisjev:enforce on`, Claude's
+  edits are allowed once Codex's result is back.
+- `/mynameisjev:prefer codex | claude` now changes only the current session.
+  `/mynameisjev:prefer --default` sets new sessions (the old global
+  setting). A session's choice wins over the project's
+  `.claude/mynameisjev.json`.
+- The full brief and review guidance goes in the first Codex note of a
+  session; later notes point back to it in one line. A compaction or a
+  review toggle brings the full text back.
+- Jev's sizing call also asks whether the message asks Claude itself to do
+  the work; then nothing is routed and the edit guard stays off.
+- A Codex `result` call on a job that is still running no longer opens
+  Claude's edits for review.
+- `/clear` carries the session's `prefer` and `review` settings to the new
+  session (new `SessionEnd` and `SessionStart` hooks, `jev-session.js`).
+- `/mynameisjev:report` counts Codex results reviewed, fixed by Claude and
+  sent back. The status line shows `review off` when review is off.
+
 ## 0.3.18
 
 - The status line shows a running Codex task on a fourth line: elapsed time,

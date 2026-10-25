@@ -1,6 +1,6 @@
 ---
-description: Route work to Codex first at any Claude usage, or back to the default
-argument-hint: [codex | claude]
+description: Route this session's work to Codex first at any Claude usage, or back to Claude; --default sets new sessions
+argument-hint: [--default] [codex | claude]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---

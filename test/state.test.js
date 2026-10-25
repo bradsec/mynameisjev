@@ -98,3 +98,43 @@ test('putRoute keeps the newest sessions only', () => {
   assert.ok(!s.routes.s0 && s.routes.s24);
   assert.strictEqual(s.route.session, 's24');
 });
+
+test('per-session prefer and review: session, then project, then default', () => {
+  const s = { ...st.DEFAULT_STATE, sessions: {} };
+  assert.strictEqual(st.preferFor(s, 's1', null), 'claude');
+  assert.strictEqual(st.reviewFor(s, 's1'), true, 'review is on by default');
+  assert.strictEqual(st.preferFor(s, 's1', { prefer: 'codex' }), 'codex', 'project over default');
+  st.putSessionSetting(s, 's1', 'prefer', 'claude');
+  st.putSessionSetting(s, 's1', 'review', false);
+  assert.strictEqual(st.preferFor(s, 's1', { prefer: 'codex' }), 'claude', 'session over project');
+  assert.strictEqual(st.reviewFor(s, 's1'), false);
+  assert.strictEqual(s.sessions.s1.prefer, 'claude', 'a second setting keeps the first');
+  assert.strictEqual(st.preferFor(s, 's2', null), 'claude', 'other sessions keep the default');
+  assert.strictEqual(st.reviewFor(s, 's2'), true);
+  assert.strictEqual(st.reviewFor({ ...s, review: false }, 's2'), false, 'default off');
+  assert.strictEqual(st.preferFor(s, null, null), 'claude', 'no session');
+});
+
+test('per-session settings survive a concurrent write and are capped', () => {
+  const a = st.readState();
+  const b = st.readState();
+  st.putSessionSetting(a, 'sa', 'prefer', 'codex');
+  st.writeState(a);
+  st.putSessionSetting(b, 'sb', 'review', false);
+  st.writeState(b);
+  assert.strictEqual(st.preferFor(onDisk(), 'sa', null), 'codex');
+  assert.strictEqual(st.reviewFor(onDisk(), 'sb'), false);
+  const c = st.readState();
+  for (let i = 0; i < 30; i += 1) st.putSessionSetting(c, `x${i}`, 'review', true);
+  assert.ok(Object.keys(c.sessions).length <= 20);
+});
+
+test('guided: per session and per review setting', () => {
+  const s = { ...st.DEFAULT_STATE, sessions: {} };
+  assert.strictEqual(st.guidedFor(s, 's1', true), false);
+  st.markGuided(s, 's1', true);
+  assert.strictEqual(st.guidedFor(s, 's1', true), true);
+  assert.strictEqual(st.guidedFor(s, 's1', false), false, 'review turned off: the plain text is new');
+  assert.strictEqual(st.guidedFor(s, 's2', true), false);
+  assert.strictEqual(st.guidedFor(s, null, true), false);
+});

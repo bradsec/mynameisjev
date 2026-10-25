@@ -19,10 +19,13 @@ const state = st.readState();
 const [cmd = 'status', ...args] = process.argv.slice(2).map((a) => a.toLowerCase());
 const print = (lines) => lines.forEach((l) => console.log(l));
 const onOff = (b) => (b ? 'on' : 'off');
+// Claude Code sets this for commands run in a session; the hooks get the
+// same ID as session_id.
+const sessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
 
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
-  update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand,
+  update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand, review: reviewCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
   decide: decideCommand, check: checkCommand, compare: compareCommand,
   tiebreak: tiebreakCommand, 'tiebreak-status': tiebreakStatus,
@@ -99,7 +102,9 @@ async function status() {
 
   console.log(`Codex: ${available ? 'available' : 'not available (needs the codex plugin enabled and the codex CLI on PATH)'}`);
   if (available) {
-    console.log(`Prefer: ${state.prefer} (/mynameisjev:prefer codex | claude)`);
+    const usable = project && !project.error ? project : null;
+    console.log(`Prefer: ${st.preferFor(state, sessionId, usable)} in this session, ${state.prefer} by default (/mynameisjev:prefer [--default] codex | claude)`);
+    console.log(`Review of Codex work: ${onOff(st.reviewFor(state, sessionId))} in this session, ${onOff(state.review !== false)} by default (/mynameisjev:review [--default] on | off)`);
     console.log(`Routed to Codex: ${s.codex}`);
     console.log(`Auto-transfer: ${onOff(state.autoTransfer)}, transfers so far: ${s.transfers}` +
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
@@ -161,6 +166,7 @@ async function report() {
     `  "+" overrides:    ${s.forced}`,
     `  subagent models set by enforce: ${s.enforced}`,
     `  Claude edits sent to Codex by enforce: ${s.editsBlocked || 0}`,
+    `  Codex results reviewed: ${s.codexReturns || 0}, fixed by Claude ${s.reviewFixes || 0}, sent back ${s.reviewSendBacks || 0}`,
     `  turns ended at the usage limit: ${s.limitHits}`,
     `  notes suppressed (no gain): ${s.suppressed}`,
     `Topic shifts flagged: ${s.shift}`,
@@ -272,20 +278,57 @@ async function cavemanCommand([arg]) {
   else console.log('Codex: turn on /mynameisjev:sync to add caveman to ~/.codex/AGENTS.md.');
 }
 
-async function preferCommand([arg]) {
-  if (arg === 'codex' || arg === 'claude') {
-    state.prefer = arg;
-    st.writeState(state);
-  } else if (arg) {
-    throw new Error('usage: /mynameisjev:prefer [codex | claude]');
+// For a per-session setting: [--default] <value>. Returns { isDefault, value }.
+function sessionArgs(args, usage) {
+  const isDefault = args.includes('--default');
+  const rest = args.filter((a) => a !== '--default');
+  if (rest.length > 1) throw new Error(usage);
+  if (!isDefault && rest[0] && !sessionId) {
+    throw new Error(`this shell has no Claude Code session ID (CLAUDE_CODE_SESSION_ID), so only the default can change. ${usage}`);
   }
-  if (state.prefer === 'codex') {
+  return { isDefault, value: rest[0] };
+}
+
+async function preferCommand(args) {
+  const usage = 'usage: /mynameisjev:prefer [--default] [codex | claude]';
+  const { isDefault, value } = sessionArgs(args, usage);
+  if (value === 'codex' || value === 'claude') {
+    if (isDefault) state.prefer = value;
+    else st.putSessionSetting(state, sessionId, 'prefer', value);
+    st.writeState(state);
+  } else if (value) {
+    throw new Error(usage);
+  }
+  const project = st.readProjectConfig(st.projectDir(process.cwd()));
+  const prefer = isDefault ? state.prefer : st.preferFor(state, sessionId, project && !project.error ? project : null);
+  console.log(isDefault ? `Default for new sessions: ${state.prefer}.` : `This session: ${prefer} (default for new sessions: ${state.prefer}).`);
+  if (prefer === 'codex') {
     console.log('Prefer: codex. Self-contained work goes to Codex at any Claude usage, and Claude hands the self-contained steps of other work to Codex while it coordinates.');
     console.log('Tiny one-line jobs stay on Claude, and work falls back to Claude while Codex is near its limit.');
     if (!codex.codexAvailable()) console.log('WARNING: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH), so work stays on Claude until it is.');
   } else {
     console.log('Prefer: claude. Work goes to Codex only for self-contained coding tasks, or once Claude usage passes the routing threshold.');
   }
+  console.log('Either way, Claude is the senior developer: it writes each Codex brief, has the final say on what Codex returns, and does the work itself when you ask it to directly.');
+}
+
+async function reviewCommand(args) {
+  const usage = 'usage: /mynameisjev:review [--default] [on | off]';
+  const { isDefault, value } = sessionArgs(args, usage);
+  if (value === 'on' || value === 'off') {
+    if (isDefault) state.review = value === 'on';
+    else st.putSessionSetting(state, sessionId, 'review', value === 'on');
+    st.writeState(state);
+  } else if (value) {
+    throw new Error(usage);
+  }
+  const review = isDefault ? state.review !== false : st.reviewFor(state, sessionId);
+  console.log(isDefault ? `Review of Codex work, default for new sessions: ${onOff(review)}.`
+    : `Review of Codex work, this session: ${onOff(review)} (default for new sessions: ${onOff(state.review !== false)}).`);
+  console.log(review
+    ? 'When Codex returns, Claude reads the diff and runs the smallest relevant check, fixes small issues itself, and sends larger ones back to Codex.'
+    : 'Claude reports what Codex returns without reviewing it.');
+  if (!codex.codexAvailable()) console.log('WARNING: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH), so there is no Codex work to review.');
 }
 
 async function enforceCommand([arg]) {

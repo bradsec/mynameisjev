@@ -39,13 +39,29 @@ const HELPER_MODELS = { 'mynameisjev:tiny': 'haiku', 'mynameisjev:everyday': 'so
 // Subagent types that run on the session's model unless given one.
 const GENERAL_TYPES = new Set([undefined, null, '', 'general-purpose', 'claude']);
 
-// The hand-off this tool call performed, or null: { target, model }.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
+
+// The companion's result command fails with one of these while the job runs
+// (codex plugin lib/job-control.mjs); a failed Bash call may not reach this
+// hook at all, but when it does its output says so.
+const UNFINISHED = /is still (queued|running)|No finished (Codex )?jobs? found/;
+const resultFinished = (hookInput) => !UNFINISHED.test(JSON.stringify(hookInput.tool_response || ''));
+
+const shellCommand = (hookInput) => {
+  const input = hookInput.tool_input || {};
+  const shell = hookInput.tool_name === 'Bash' || hookInput.tool_name === 'PowerShell';
+  return shell && typeof input.command === 'string' ? input.command : '';
+};
+
+// The hand-off this tool call performed, or null: { target, model, reviewing? }.
+// reviewing: Codex's result is back in this conversation (a foreground task),
+// so Claude may make small review fixes (jev-codex-steps.js).
 function handOff(hookInput) {
   const input = hookInput.tool_input || {};
-  const command = typeof input.command === 'string' ? input.command : '';
-  if ((hookInput.tool_name === 'Bash' || hookInput.tool_name === 'PowerShell') && /codex-companion\.mjs"?\s+task\b/.test(command)) {
+  const command = shellCommand(hookInput);
+  if (/codex-companion\.mjs"?\s+task\b/.test(command)) {
     const model = command.match(/--model\s+"?([\w.-]+)/);
-    return { target: 'codex', model: model ? model[1] : 'default' };
+    return { target: 'codex', model: model ? model[1] : 'default', reviewing: !/\s--background\b/.test(command) };
   }
   if (hookInput.tool_name === 'Agent' && HELPER_MODELS[input.subagent_type]) {
     return { target: 'claude', model: HELPER_MODELS[input.subagent_type] };
@@ -61,7 +77,13 @@ async function watch(hookInput) {
   const current = st.readState();
   if (!current.enabled) return null;
   const ran = handOff(hookInput);
+  const before = st.routeFor(current, hookInput.session_id);
+  const reviewOn = st.reviewFor(current, hookInput.session_id);
+  const reviewing = !!(reviewOn && before && before.target === 'codex' && before.reviewing);
   if (ran) {
+    // A new Codex task while Claude reviews the last result: sent back.
+    if (ran.target === 'codex' && reviewing) current.stats.reviewSendBacks = (current.stats.reviewSendBacks || 0) + 1;
+    if (reviewOn && ran.target === 'codex' && ran.reviewing) current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
     // session keeps the Codex edit guard (jev-codex-steps.js) on for this turn.
     st.putRoute(current, { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null });
     current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
@@ -72,6 +94,20 @@ async function watch(hookInput) {
       const codex = require('./jev-codex');
       codex.refreshInBackgroundIfStale(codex.readCache(), 0);
     }
+  }
+  // A background task's result read back: review fixes may start.
+  const route = before;
+  if (!ran && route && route.target === 'codex' && route.session && !route.reviewing &&
+      /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput)) && resultFinished(hookInput)) {
+    st.putRoute(current, { ...route, reviewing: true });
+    if (reviewOn) current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
+    try { st.writeState(current); } catch (e) { /* the edit guard stays on for this one */ }
+  }
+  // Claude's first own edit while reviewing a Codex result: fixed in place.
+  if (reviewing && !before.fixed && EDIT_TOOLS.has(hookInput.tool_name)) {
+    st.putRoute(current, { ...before, fixed: true });
+    current.stats.reviewFixes = (current.stats.reviewFixes || 0) + 1;
+    try { st.writeState(current); } catch (e) { /* the report misses one */ }
   }
   if (peakPct() < FAST_PATH_PCT) return null;
 
@@ -101,6 +137,14 @@ async function watch(hookInput) {
   const head = `Jev: Claude ${claude.window} usage reached ${pct}% during this turn (resets ${when}).${r.paceText(claude)}`;
   const codexHead = codexNow.available ? `${head} ${codexNow.text}.` : head;
   const canHandOff = codexNow.ok && companion;
+  // The sub-step note, full or short (st.guidedFor), marking the session
+  // guided; state is written again after the notes are built.
+  const steps = () => {
+    const review = st.reviewFor(state, hookInput.session_id);
+    const note = r.subStepAdvice(claude, companion, { review, guided: st.guidedFor(state, hookInput.session_id, review) });
+    st.markGuided(state, hookInput.session_id, review);
+    return note;
+  };
 
   let notice;
   let context;
@@ -114,10 +158,13 @@ async function watch(hookInput) {
       : state.autoTransfer ? ` Jev copies this session into Codex at ${TH.auto}%.`
         : ' Run /codex:transfer to continue this session in Codex.');
     context = `${head} Near the limit: finish the current step, then stop and give a short summary of what is left.` +
-      (canHandOff ? ` Hand any remaining self-contained step to Codex: ${r.subStepAdvice(claude, companion)}` : '');
+      (canHandOff ? ` Hand any remaining self-contained step to Codex: ${steps()}` : '');
   } else {
     notice = `${codexHead}${canHandOff ? ' Claude now hands self-contained steps to Codex.' : ''}`;
-    context = canHandOff ? r.subStepAdvice(claude, companion) : `${head} Keep the rest of this turn short.`;
+    context = canHandOff ? steps() : `${head} Keep the rest of this turn short.`;
+  }
+  if (canHandOff && level !== 'auto') {
+    try { r.writeState(state); } catch (e) { /* the next Codex note is the full one again */ }
   }
   return {
     systemMessage: notice,

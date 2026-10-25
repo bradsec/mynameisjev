@@ -6,9 +6,12 @@
 // edits go to Codex's quota instead of depending on Claude following the note.
 //
 // The route stays 'codex' after a Codex task ran (jev-usage-watch.js), so the
-// guard holds for the rest of the turn. A "+claude" message, another
-// session, or a route older than ROUTE_MAX_AGE_MS lifts it. Edits made
-// through Bash are not caught here; the router note asks Claude not to.
+// guard holds for the rest of the turn, except that with review on
+// (`/mynameisjev:review`) Claude may edit once Codex's result is back
+// (route.reviewing), to make small fixes instead of another round trip.
+// A "+claude" message, another session, or a route older than
+// ROUTE_MAX_AGE_MS lifts it. Edits made through Bash are not caught here;
+// the router note asks Claude not to.
 
 const st = require('./jev-state');
 const codex = require('./jev-codex');
@@ -25,6 +28,8 @@ function guard(hookInput, state, nowMs, companion) {
   if (!route || route.target !== 'codex') return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
   if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;
+  const review = st.reviewFor(state, hookInput.session_id);
+  if (review && route.reviewing) return null;
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -32,7 +37,9 @@ function guard(hookInput, state, nowMs, companion) {
       permissionDecisionReason:
         'Jev: this message is routed to Codex, so file edits go to Codex, not Claude (/mynameisjev:enforce off stops this). ' +
         `Send the edit with one Bash call: node "${companion.replace(/\\/g, '/')}" task --write "<the change, with the file paths and context it needs>". ` +
-        'Do not make the edit through Bash commands instead.',
+        'Do not make the edit through Bash commands instead.' +
+        (review ? ' Small review fixes are allowed once Codex\'s result is back.' : '') +
+        ' If the user explicitly asked you to do this yourself, tell them to resend it starting with "+claude".',
     },
   };
 }

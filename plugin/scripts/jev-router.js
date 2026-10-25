@@ -377,14 +377,19 @@ function routeAdvice(tier, result, ctx) {
   const heavy = result.heavy !== null && result.heavy >= NOUL_THRESHOLD;
   const coding = result.coding !== null && result.coding >= NOUL_THRESHOLD;
 
+  // The user asked Claude itself to do it: no hand-off, and with no Codex
+  // route the edit guard (jev-codex-steps.js) stays off.
+  if (askedClaude(result)) return { suppress: 'the user asked Claude to do it' };
+
   const companion = codex.companionPath();
+  const opts = { review: ctx.review, guided: ctx.guided };
   // Codex first: Claude's usage is past the routing threshold, or the user
   // turned prefer-Codex mode on.
   const codexFirst = ctx.claudeLow || ctx.preferCodex;
   // Work that needs this conversation can't move to Codex whole, but its
   // self-contained steps can: with Codex first, that is the note to give.
   if (!contained && codexFirst && ctx.codexNow.ok && companion) {
-    return { note: subStepAdvice(ctx.claudeLow ? ctx.claude : null, companion), codex: true, model: 'steps' };
+    return { note: subStepAdvice(ctx.claudeLow ? ctx.claude : null, companion, opts), codex: true, model: 'steps' };
   }
   if (contained && ctx.codexNow.ok && companion && (codexFirst || coding)) {
     // Same start-up argument as for Claude helpers: a one-line job is
@@ -395,26 +400,32 @@ function routeAdvice(tier, result, ctx) {
       : ctx.preferCodex ? 'prefer-Codex mode is on'
         : 'self-contained coding task; Codex uses a separate quota';
     const choice = codex.tierChoice(tier, ctx.overrides, ctx.codexCache);
-    return { note: codexAdvice(tier, result, reason, choice, companion), codex: true, model: choice.model || 'default' };
+    return { note: codexAdvice(tier, result, reason, choice, companion, opts), codex: true, model: choice.model || 'default' };
   }
 
   const advice = delegationAdvice(tier, result, ctx.sessionFamily);
   return typeof advice === 'string' ? { note: advice, codex: false, model: TIER_INFO[tier].model, effort: TIER_INFO[tier].effort } : advice;
 }
 
+const askedClaude = (result) => result.self !== null && result.self !== undefined && result.self >= NOUL_THRESHOLD;
+
 // Note for Claude when its plan usage is high but the message can't go to
 // Codex whole: keep coordinating here, send the self-contained steps there.
 // `claude` is the usage peak when that is the reason, or null in prefer-Codex
-// mode.
-function subStepAdvice(claude, companion) {
+// mode. opts as for codexCall.
+function subStepAdvice(claude, companion, { review, guided } = {}) {
   const why = claude
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
   return why +
-    'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search, review and research step to Codex ' +
-    `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the step, with the context it needs>" (add --write if it should edit files). ` +
-    'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ' +
-    'Keep your own replies short.';
+    'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
+    `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the brief>" (add --write if it should edit files). ` +
+    `${guided ? shortGuide(review) : brief()} ` +
+    (review
+      ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ' +
+        `The exception is small fixes while reviewing what Codex returned.${guided ? '' : ` ${REVIEW}`} `
+      : 'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ') +
+    `${DIRECT_ASK} Keep your own replies short.`;
 }
 
 // User notice once Claude usage crosses a threshold, or null below it. The
@@ -503,23 +514,54 @@ function transferNotice(claude, codexNow, t) {
 // Note telling Claude to hand the task to Codex. Calls the companion script
 // directly: the plugin's codex:codex-rescue agent is itself a Claude Sonnet
 // subagent, which would spend the Claude usage this route is meant to save.
-function codexAdvice(tier, result, reason, choice, companion) {
+function codexAdvice(tier, result, reason, choice, companion, opts) {
   return `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}). ` +
-    `Route it to Codex (${reason}) ${codexCall(choice, companion)}`;
+    `Route it to Codex (${reason}) ${codexCall(choice, companion, opts)}\n${DIRECT_ASK}`;
 }
 
-function codexCall(choice, companion) {
+// Claude stays in charge of Codex hand-offs as the senior developer: it
+// writes the brief, has the final say on the result and, with review on,
+// checks it. The user's message alone leaves Codex
+// without the conversation's context.
+const BRIEF = 'You are the senior developer with the final say, and Codex is a developer on your team: ' +
+  'what it returns is a proposal you accept, fix or reject. Do not pass the user\'s message through as is. ' +
+  'Write Codex a short brief: Goal; Context (the files, decisions and findings from this conversation it needs); ' +
+  'Constraints (style, scope, what not to touch); Done when; Verify with (the test or check to run). ' +
+  'Tell Codex to work token-efficiently (read only what it needs, terse report), to use its installed skills where they fit ' +
+  '(ponytail for the simplest solution, superpowers for test-first work and debugging, if installed, ' +
+  'and any other skill that saves tokens without lowering the quality of the work), ' +
+  'and to end with the files it changed and the checks it ran. Use your own relevant skills the same way: ' +
+  'superpowers and others where they apply, and any that save tokens without lowering quality.';
+const RTK_BRIEF = 'RTK is installed: tell Codex to prefix its shell commands with rtk (for example rtk git status) to cut command output.';
+// The brief text, with the RTK line only when the rtk CLI is on PATH: Codex
+// has no hook to add the prefix for it.
+const brief = () => (sync.rtkBinary() ? `${BRIEF} ${RTK_BRIEF}` : BRIEF);
+const REVIEW = 'When Codex returns, review its work cheaply: read git diff --stat and the diff of the changed files only, ' +
+  'not whole files, and run the smallest relevant check. Fix small issues yourself (about 10 lines or fewer); ' +
+  'send anything larger back to Codex as a follow-up brief. Then tell the user the outcome in one or two lines.';
+const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do the work yourself, do it here instead.';
+// After the first Codex note of a session (or since its last compaction) the
+// full brief and review text is already in Claude's context, so later notes
+// only point back to it (st.guidedFor).
+const shortGuide = (review) => 'As in Jev\'s first Codex note this session: you are the senior developer with the final say; ' +
+  `write Codex a brief (Goal, Context, Constraints, Done when, Verify with)${review ? ', then review its result and fix small issues yourself' : ''}.`;
+
+// opts.review: Claude checks each Codex result and fixes small issues
+// itself. opts.guided: this session already has the full text (shortGuide).
+function codexCall(choice, companion, { review, guided } = {}) {
   const flags = [
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
   ].filter(Boolean).join(' ');
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash and PowerShell on Windows too.
-    `node "${companion.replace(/\\/g, '/')}" task ${flags} "<the task, self-contained>"\n` +
+    `node "${companion.replace(/\\/g, '/')}" task ${flags} "<the brief>"\n` +
+    `${guided ? shortGuide(review) : brief()}\n` +
     'Add --write if Codex should edit files. For long multi-step work add --background; it prints a job ID. ' +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
-    'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.';
+    'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.' +
+    (review && !guided ? `\n${REVIEW}` : '');
 }
 
 // A routing override at the start of a message: "+large fix the parser".
@@ -563,7 +605,7 @@ function overrideAdvice(o, ctx) {
   }
   const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache, true);
   return {
-    note: `${prefix}Route it to Codex ${codexCall(choice, companion)}`,
+    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided })}`,
     route: ['codex', choice.model || 'default', 'suggested'],
     // Asked for explicitly, so it goes even when usage looks high; the user
     // hears why it may fail.
@@ -620,6 +662,14 @@ async function classify(prompt, previous, apiKey) {
         false: 'prose, a lookup, planning, or a question not about code',
       },
     },
+    self: {
+      type: 'noul',
+      instructions: 'Does the message explicitly ask the assistant it is addressed to (Claude) to do the work itself, rather than hand it to another agent or model?',
+      criteria: {
+        true: 'it asks Claude itself to do it: "do it yourself", "use Claude for this", "don\'t delegate"',
+        false: 'it does not say who should do the work',
+      },
+    },
     effort: {
       type: 'score',
       instructions: 'How much reasoning effort does the message need, regardless of how big the job is?',
@@ -649,6 +699,7 @@ async function classify(prompt, previous, apiKey) {
     contained: noul('contained'),
     heavy: noul('heavy'),
     coding: noul('coding'),
+    self: noul('self'),
     effort: effortLevel(data.answers.effort && data.answers.effort.score),
     cost: (data.usage && data.usage.cost) || 0,
   };
@@ -666,7 +717,7 @@ function looksSkippable(prompt) {
 // helpers shared with the mid-turn usage watch (jev-usage-watch.js).
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
-  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice,
+  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
   coldCache, coldGuardReason, modelStreak, effortLevel, effortStreak, sessionEffort,
   claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
@@ -790,14 +841,17 @@ function main() {
         state.projectNotice = `${sessionId}:${project.path}`;
         notices.push(`Jev: ${project.path} is not usable (${project.error}), so Jev does not size messages in this project until it is fixed.`);
       }
-      const prefer = (project && project.prefer) || state.prefer;
+      const prefer = st.preferFor(state, sessionId, project);
+      const review = st.reviewFor(state, sessionId);
+      const guided = st.guidedFor(state, sessionId, review);
 
       // Overrides need no Jev call, so they work without a key and in
       // projects that turn sizing off.
       const override = parseOverride(prompt);
       if (override) {
-        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers });
+        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided });
         state.stats.forced += 1;
+        if (o.route[0] === 'codex') st.markGuided(state, sessionId, review);
         setRoute(state, ...o.route, sessionId, o.effort);
         state.lastSilent = null;
         writeState(state);
@@ -861,10 +915,11 @@ function main() {
         // Unsized work still runs on Claude; with Claude low, point its
         // self-contained steps at Codex anyway.
         const companion = codex.companionPath();
-        if ((isLow || prefer === 'codex') && codexNow.ok && companion) {
+        if ((isLow || prefer === 'codex') && codexNow.ok && companion && !askedClaude(result)) {
           setRoute(state, 'codex', 'steps', 'suggested', sessionId);
+          st.markGuided(state, sessionId, review);
           writeState(state);
-          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion) };
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion, { review, guided }) };
         }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
@@ -884,13 +939,17 @@ function main() {
           claude,
           claudeLow: isLow,
           preferCodex: prefer === 'codex',
+          review,
+          guided,
           codexNow,
           codexCache,
           overrides: state.codexTiers,
         });
         if (advice.note) {
-          if (advice.codex) state.stats.codex += 1;
-          else state.stats.helper += 1;
+          if (advice.codex) {
+            state.stats.codex += 1;
+            st.markGuided(state, sessionId, review);
+          } else state.stats.helper += 1;
           setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested', sessionId, advice.effort);
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };

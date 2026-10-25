@@ -87,6 +87,34 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-session.js",
+              "start"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-session.js",
+              "start"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "StopFailure": [
@@ -143,6 +171,22 @@
             ],
             "timeout": 8,
             "statusMessage": "Jev checking reply..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-session.js",
+              "end"
+            ],
+            "timeout": 5
           }
         ]
       }

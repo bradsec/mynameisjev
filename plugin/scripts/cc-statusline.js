@@ -288,9 +288,11 @@ function jevSegment(state, projectDir, session) {
   const label = cyan(bold('JEV'));
   if (!state.enabled) return `${label} ${mutedGray('off')}`;
   if (project && project.error) return `${label} ${red('project config error')}`;
-  const prefer = (project && project.prefer) || state.prefer;
+  const prefer = require('./jev-state').preferFor(state, session, project);
   // Prefer-Codex mode is a standing choice, so it stays visible.
-  const route = (prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + routeSuffix(require('./jev-state').routeFor(state, session));
+  // Review is on by default, so only its absence is marked.
+  const review = require('./jev-state').reviewFor(state, session) ? '' : ` ${mutedGray('review off')}`;
+  const route = (prefer === 'codex' ? ` ${cyan('codex-first')}` : '') + review + routeSuffix(require('./jev-state').routeFor(state, session));
   if (project && !project.router) return `${label} ${mutedGray('off in project')}${route}`;
   if (!process.env.OPENROUTER_API_KEY) return `${label} ${red('no key')}`;
   const last = state.lastCall;

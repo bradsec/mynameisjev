@@ -166,4 +166,4 @@ async function ensureAll({ withCaveman = true } = {}) {
   return lines;
 }
 
-module.exports = { buildAgents, agentsStatus, syncAgents, rtkStatus, rtkClaudeHook, ensureAll, agentsPath, backupPath };
+module.exports = { buildAgents, agentsStatus, syncAgents, rtkStatus, rtkBinary, rtkClaudeHook, ensureAll, agentsPath, backupPath };

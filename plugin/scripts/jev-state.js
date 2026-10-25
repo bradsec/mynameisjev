@@ -53,6 +53,11 @@ const DEFAULT_STATE = {
     enforced: 0,
     // Claude file edits jev-codex-steps.js denied while routed to Codex.
     editsBlocked: 0,
+    // Codex results back for Claude's review, how many Claude then fixed
+    // itself and how many it sent back as a new Codex task (jev-usage-watch.js).
+    codexReturns: 0,
+    reviewFixes: 0,
+    reviewSendBacks: 0,
     // Completeness checks run and stops they blocked (jev-check.js).
     // checkScope: blocks that flagged edits beyond the request.
     checks: 0, checkBlocks: 0, checkScope: 0,
@@ -104,8 +109,19 @@ const DEFAULT_STATE = {
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
   codexTiers: {},
-  // 'codex' routes work to Codex first at any Claude usage (`/mynameisjev:prefer`).
+  // 'codex' routes work to Codex first at any Claude usage
+  // (`/mynameisjev:prefer --default`); a session's own choice wins (sessions).
   prefer: 'claude',
+  // Claude reviews Codex's work and makes small fixes itself
+  // (`/mynameisjev:review --default`); a session's own choice wins.
+  review: true,
+  // Per-session settings from `/mynameisjev:prefer` and `/mynameisjev:review`:
+  // { <session>: { at, prefer?, review?, guided? } }, newest MAX_ROUTE_SESSIONS
+  // kept; guided is set by the router (guidedFor).
+  sessions: {},
+  // The session /clear just ended, for jev-session.js to carry its
+  // settings to the new one: { from, cwd, at }.
+  clearCarry: null,
   // Copy the session into Codex from 90% Claude usage (`/mynameisjev:transfer on`).
   autoTransfer: false,
   lastTransfer: null,
@@ -144,6 +160,7 @@ function normalize(parsed) {
     helperTokens: { ...(parsed.helperTokens || {}) },
     costs: { ...(parsed.costs || {}) },
     routes: { ...(parsed.routes || {}) },
+    sessions: { ...(parsed.sessions || {}) },
   };
 }
 
@@ -240,9 +257,41 @@ function routeFor(state, session) {
   return state.route && state.route.session === session ? state.route : null;
 }
 
+// Per-session settings: 'prefer', 'review' or 'guided'.
+function putSessionSetting(state, session, key, value) {
+  const own = { ...((state.sessions || {})[session] || {}), [key]: value, at: new Date().toISOString() };
+  const sessions = { ...(state.sessions || {}), [session]: own };
+  state.sessions = Object.fromEntries(Object.entries(sessions)
+    .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at)))
+    .slice(0, MAX_ROUTE_SESSIONS));
+}
+
+const sessionSetting = (state, session, key) => (session && state.sessions && state.sessions[session] || {})[key];
+
+// 'codex' or 'claude' for the session: its own choice, then the project's
+// .claude/mynameisjev.json, then the default.
+function preferFor(state, session, project) {
+  return sessionSetting(state, session, 'prefer') || (project && project.prefer) || state.prefer;
+}
+
+// Whether the session already got the full Codex brief and review text for
+// this review setting since it started or last compacted (jev-router.js
+// shortGuide). guided records the setting it was given with.
+const guidedFor = (state, session, review) => !!session && sessionSetting(state, session, 'guided') === (review ? 'review' : 'plain');
+
+function markGuided(state, session, review) {
+  if (session && !guidedFor(state, session, review)) putSessionSetting(state, session, 'guided', review ? 'review' : 'plain');
+}
+
+function reviewFor(state, session) {
+  const own = sessionSetting(state, session, 'review');
+  return typeof own === 'boolean' ? own : state.review !== false;
+}
+
 // Per-project overrides in <project>/.claude/mynameisjev.json:
 //   { "router": false }     never send this project's messages to Jev
-//   { "prefer": "codex" }   or "claude": overrides /mynameisjev:prefer here
+//   { "prefer": "codex" }   or "claude": overrides the /mynameisjev:prefer
+//                           default here; a session's own choice still wins
 // Returns null when the file is absent, else { path, router, prefer, error }.
 // A file that can't be read or parsed sets `error` and router: false, so a
 // broken privacy opt-out fails closed instead of sending text.
@@ -294,6 +343,6 @@ function projectDir(fallback) {
 
 module.exports = {
   PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, DEFAULT_STATE, readState, writeState,
-  putRoute, routeFor,
+  putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
 };

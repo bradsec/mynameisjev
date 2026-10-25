@@ -63,6 +63,13 @@ test('route: hidden after 30 minutes', () => {
   assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true }, route: { at: old, target: 'claude', model: 'opus', how: 'session' } }, 'k'), /→/);
 });
 
+test('per-session prefer and review off are marked', () => {
+  const input = '{"model":{"display_name":"Opus 5.5"},"session_id":"s1"}';
+  const sessions = { s1: { at: new Date().toISOString(), prefer: 'codex', review: false } };
+  assert.match(line1({ enabled: true, lastCall: { ok: true }, sessions }, 'k', input), /JEV ✓ codex-first review off/);
+  assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true }, sessions }, 'k'), /codex-first|review off/, 'other session');
+});
+
 test('prefer codex mode is marked', () => {
   assert.match(line1({ enabled: true, lastCall: { ok: true }, prefer: 'codex' }, 'k'), /JEV ✓ codex-first/);
   assert.doesNotMatch(line1({ enabled: true, lastCall: { ok: true } }, 'k'), /codex-first/);

@@ -175,7 +175,8 @@ minutes):
 | `→ opus` (grey) | Handled on the session's own Claude model |
 | `→ sonnet?`, `→ codex gpt-6.1-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
 | `→ sonnet ✓`, `→ codex gpt-6.1-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
-| `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on |
+| `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on in this session |
+| `review off` (gray) | Claude's review of Codex work is off in this session |
 | `off in project`, `project config error` | See [Per-project settings](#per-project-settings) |
 
 With Codex set up, line 3 shows Codex plan usage. Jev refreshes it every 5
@@ -240,7 +241,8 @@ lists this session's jobs on demand.
 | `/mynameisjev:report` | Notes given vs hand-offs that ran, and helper subagent token use per model |
 | `/mynameisjev:limits` | Claude and Codex plan usage and reset times |
 | `/mynameisjev:codex` | Show or set the Codex model per task size: `set <tier> <model> [effort]`, `reset` |
-| `/mynameisjev:prefer` | `codex` routes work to Codex first at any Claude usage; `claude` (default) goes back |
+| `/mynameisjev:prefer` | `codex` routes this session's work to Codex first at any Claude usage; `claude` (default) goes back; `--default` sets new sessions |
+| `/mynameisjev:review` | `on` (default) or `off`: Claude reviews Codex's work and makes small fixes itself, in this session; `--default` sets new sessions |
 | `/mynameisjev:statusline` | `install` Jev's status line, `wrap [--with-jev]` your own, or `uninstall` |
 | `/mynameisjev:sync` | Opt-in, see below |
 | `/mynameisjev:caveman` | Opt-in, see below |
@@ -394,15 +396,53 @@ a `+codex:large` or `+codex:hardest` prefix, or a tier set to it with
 
 Models missing from your Codex account's list fall back to Codex's default.
 
+### Claude leads, Codex builds
+
+Claude is the senior developer and has the final say; Codex works as a
+developer on its team. For every Codex hand-off the router tells Claude not
+to pass your message through as is, but to write Codex a short brief: goal,
+the context from this conversation it needs, constraints, what done means,
+and the check to run. The brief asks Codex to work token-efficiently, to use
+its installed skills where they fit (ponytail for the simplest solution,
+superpowers for test-first work and debugging, if installed, and any other
+skill that saves tokens without lowering the quality of the work), and to end
+with the files it changed and the checks it ran. With the `rtk` CLI on your
+`PATH`, the brief also tells Codex to prefix its shell commands with `rtk`.
+Claude uses its own skills
+the same way: superpowers and others where they apply, and any that save
+tokens without lowering quality.
+
+The first Codex note in a session carries this guidance in full; later notes
+point back to it in one line, so it isn't repeated in context on every
+message. After a compaction, or when review is switched on or off, the next
+note gives it in full again. When your message asks Claude to do the work
+itself ("do it yourself", "use Claude for this"), Jev sees that in the same
+sizing call and routes nothing, so the edit guard stays off too. If your message asks Claude to do the work itself, Claude does it here
+instead.
+
+With review on (the default), Claude checks Codex's work cheaply when it
+returns: it reads `git diff --stat` and the diff of the changed files, not
+whole files, and runs the smallest relevant check. It fixes small issues
+itself (about 10 lines or fewer) and sends larger ones back to Codex as a
+follow-up brief. With `/mynameisjev:enforce on`, Claude's own edits are
+allowed again once a foreground Codex task returns or a background task's
+result is read. `/mynameisjev:review off` turns review off for the current
+session; `/mynameisjev:review --default off` for new sessions.
+
 ### Prefer Codex
 
-`/mynameisjev:prefer codex` makes Codex the first choice at any Claude usage,
+`/mynameisjev:prefer codex` makes Codex the first choice in the current
+session at any Claude usage,
 the same routing that normally starts at 80%: self-contained work goes to
 Codex whole, and for work that needs the conversation Claude keeps the
 coordination and hands the self-contained steps to Codex. Tiny one-line jobs
 stay on Claude (a hand-off costs more), and work falls back to Claude while
 Codex is near its limit. The status line shows `codex-first` while it's on;
-`/mynameisjev:prefer claude` switches back.
+`/mynameisjev:prefer claude` switches back. Other sessions keep their own
+setting; `/mynameisjev:prefer --default codex` makes Codex first for new
+sessions. A session's own choice wins over the project file below, which
+wins over the default. `/clear` starts a new session; its `prefer` and
+`review` settings carry over to it.
 
 Claude Code's own conversation always runs on a Claude model. To leave Claude
 out entirely, continue in the Codex CLI (`/codex:transfer`, then
@@ -458,7 +498,7 @@ there:
 | Key | Effect |
 | --- | --- |
 | `router` | `false` stops sizing in this project: no message text is sent. Limit notices and `+` overrides still work |
-| `prefer` | `"codex"` or `"claude"`, overriding `/mynameisjev:prefer` in this project |
+| `prefer` | `"codex"` or `"claude"`, overriding the `/mynameisjev:prefer --default` setting in this project. A session's own `/mynameisjev:prefer` still wins |
 
 If the file can't be read or has an invalid value, Jev tells you once per
 session and does not size messages in that project until it is fixed. The
@@ -475,6 +515,8 @@ status line shows `off in project` or `project config error`, and
 - Claude helper and Codex notes given, next to the hand-offs that ran (runs
   include hand-offs Claude started without a note)
 - `+` overrides used, and notes suppressed because a hand-off would not pay off
+- Codex results Claude reviewed, how many it fixed itself and how many it
+  sent back to Codex
 - tokens used by `mynameisjev:*` subagents per model (input, cache write,
   cache read, output), read from their transcripts when they finish
 
