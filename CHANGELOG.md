@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.18
+
+- The status line shows a running Codex task on a fourth line: elapsed time,
+  phase and its latest step. After the task ends, the line shows the outcome
+  for 5 minutes.
+- For long `--background` Codex tasks, the router tells Claude to follow
+  progress with the Monitor tool through `jev-codex-jobs.js watch <job-id>`.
+- Codex usage refreshes every minute while a Codex task runs, and right
+  after a Codex task returns, instead of every 5 minutes.
+
 ## 0.3.17
 
 - Automatic Codex routing no longer uses `gpt-6-astra`: large and hardest

@@ -318,7 +318,9 @@ function routeSuffix(route) {
 // router keeps (jev-codex.js) so the status line never waits on Codex;
 // a stale cache triggers that module's background refresh (lock-guarded, so
 // frequent status line runs start at most one). Returns '' when unavailable.
-function codexLine(state) {
+// jobRunning: a Codex task of this session is running, so usage is refreshed
+// every minute instead of every five.
+function codexLine(state, jobRunning) {
   let codex;
   try {
     codex = require('./jev-codex');
@@ -327,7 +329,7 @@ function codexLine(state) {
   }
   if (!codex.codexAvailable()) return '';
   const cache = codex.readCache();
-  codex.refreshInBackgroundIfStale(cache);
+  codex.refreshInBackgroundIfStale(cache, jobRunning ? codex.ACTIVE_MAX_AGE_MS : codex.CACHE_MAX_AGE_MS);
   const label = cyan(bold('CODEX'));
   if (cache?.error) return `${label} ${mutedGray(`usage unavailable: ${cache.error}`)}`;
   if (!cache?.limits) return `${label} ${mutedGray('usage loading…')}`;
@@ -341,7 +343,7 @@ function codexLine(state) {
   if (l.secondary) parts.push(metricBar('7D', pctOf(l.secondary), 6) + resetSuffix(l.secondary.resetsAt, true));
   if (l.reachedType || l.ordinaryUsageAllowed === false) parts.push(red('LIMIT REACHED'));
   const ageMin = Math.floor((Date.now() - cache.at) / 60000);
-  if (ageMin >= 15) parts.push(mutedGray(`${ageMin}m old`));
+  if (ageMin >= (jobRunning ? 2 : 15)) parts.push(mutedGray(`${ageMin}m old`));
   // A recent automatic transfer means Claude is near its limit: keep the
   // command to continue in Codex in view (it is easy to miss as a notice).
   const last = state?.lastTransfer;
@@ -349,6 +351,26 @@ function codexLine(state) {
     parts.push(red(`→ codex resume ${last.threadId}`));
   }
   return parts.join(mutedGray(' · '));
+}
+
+// ── Codex task (fourth line) ──────────────────────────────────────────────────
+// This session's running Codex companion task: elapsed time, phase and the
+// latest step from its log. A finished task stays for a few minutes with its
+// outcome. Returns '' when there is none.
+function codexJobLine(job) {
+  if (!job) return '';
+  const label = cyan(bold('CODEX TASK'));
+  const sep = mutedGray(' · ');
+  const now = Date.now();
+  if (job.status === 'queued' || job.status === 'running') {
+    const parts = [`${label} ${amber(job.status)} ${job.startedAt ? require('./jev-codex-jobs').fmtElapsed(now - job.startedAt) : ''}`.trimEnd()];
+    if (job.phase && job.phase !== job.status) parts.push(job.phase);
+    if (job.last) parts.push(mutedGray(job.last.length > 80 ? `${job.last.slice(0, 79)}…` : job.last));
+    return parts.join(sep);
+  }
+  const took = job.startedAt && job.completedAt ? ` after ${require('./jev-codex-jobs').fmtElapsed(job.completedAt - job.startedAt)}` : '';
+  const outcome = job.status === 'completed' ? green(`done ✓${took}`) : red(`${job.status}${took}`);
+  return `${label} ${outcome}${sep}${mutedGray(`/codex:result ${job.id}`)}`;
 }
 
 // ── Git status ────────────────────────────────────────────────────────────────
@@ -664,8 +686,12 @@ process.stdin.on('end', () => {
       return [dirPart, gitPart, tokenPart, costPart, cachePart].filter(Boolean).join(dotSep);
     };
     const line2Parts = fitLine([line2For(true), line2For(false)]);
-    const line3      = codexLine(state);
-    const output     = [line1, line2Parts, line3].filter(Boolean).join('\n');
+    let job = null;
+    try { job = require('./jev-codex-jobs').sessionJob(session); } catch (_) {}
+    const jobRunning = !!job && (job.status === 'queued' || job.status === 'running');
+    const line3      = codexLine(state, jobRunning);
+    const line4      = codexJobLine(job);
+    const output     = [line1, line2Parts, line3, line4].filter(Boolean).join('\n');
 
     process.stdout.write(output);
   } catch (_) {

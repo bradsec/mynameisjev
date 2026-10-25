@@ -22,6 +22,9 @@ const REFRESH_TIMEOUT_MS = 10000;
 // Usage moves slowly relative to prompts; five minutes keeps routing current
 // without starting app-server on every prompt.
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+// While a Codex task runs, its usage climbs by the minute. The refresh only
+// reads rate limits, so it costs no Codex usage itself.
+const ACTIVE_MAX_AGE_MS = 60 * 1000;
 // A refresh that has not finished in this long is treated as dead.
 const LOCK_MAX_AGE_MS = 30 * 1000;
 
@@ -148,11 +151,12 @@ function readCache() {
   return readJson(cachePath);
 }
 
-// Start a background refresh when the cache is stale, unless one is already
-// running. Never waits: the caller uses whatever cache exists now.
-function refreshInBackgroundIfStale(cache) {
+// Start a background refresh when the cache is older than maxAgeMs, unless
+// one is already running. Never waits: the caller uses whatever cache exists
+// now.
+function refreshInBackgroundIfStale(cache, maxAgeMs = CACHE_MAX_AGE_MS) {
   if (!codexAvailable()) return;
-  if (cache && Date.now() - cache.at < CACHE_MAX_AGE_MS) return;
+  if (cache && Date.now() - cache.at < maxAgeMs) return;
   try {
     const lockAge = Date.now() - fs.statSync(lockPath).mtimeMs;
     if (lockAge < LOCK_MAX_AGE_MS) return;
@@ -207,6 +211,7 @@ module.exports = {
   TASK_EFFORTS,
   PREMIUM_MODELS,
   CACHE_MAX_AGE_MS,
+  ACTIVE_MAX_AGE_MS,
   companionPath,
   readCache,
   refreshCache,

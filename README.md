@@ -178,6 +178,19 @@ minutes):
 | `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on |
 | `off in project`, `project config error` | See [Per-project settings](#per-project-settings) |
 
+With Codex set up, line 3 shows Codex plan usage. Jev refreshes it every 5
+minutes, every minute while a Codex task runs, and right after a Codex task
+returns. While this session has a Codex task running, foreground or
+`--background`, a fourth line shows its progress, read from the companion's
+job log:
+
+```text
+CODEX TASK running 6m12s · editing · Applying 2 file change(s).
+```
+
+When the task ends, the line shows `done ✓` or `failed` and the time taken
+for 5 minutes, with the `/codex:result <job-id>` command.
+
 ### 5. Codex (optional)
 
 Skip this if you don't use Codex; nothing Codex-related runs without it.
@@ -198,6 +211,18 @@ Then in Claude Code:
 mynameisjev detects Codex automatically (the plugin enabled and `codex` on
 your `PATH`) and turns on Codex routing, the Codex status line and
 `/mynameisjev:codex`.
+
+For long work the router tells Claude to start the task with `--background`
+and follow it with Claude Code's Monitor tool:
+
+```bash
+node "<plugin>/scripts/jev-codex-jobs.js" watch <job-id>
+```
+
+It prints Codex's progress messages, file changes, failed commands and the
+end of the turn as they happen, then exits when the job ends. It skips the
+routine command lines, so each update is worth reading. `/codex:status`
+lists this session's jobs on demand.
 
 ## Commands
 

@@ -516,7 +516,10 @@ function codexCall(choice, companion) {
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash and PowerShell on Windows too.
     `node "${companion.replace(/\\/g, '/')}" task ${flags} "<the task, self-contained>"\n` +
-    'Add --write if Codex should edit files. For long multi-step work add --background and check it later with the companion\'s status/result commands.';
+    'Add --write if Codex should edit files. For long multi-step work add --background; it prints a job ID. ' +
+    'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
+    `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
+    'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.';
 }
 
 // A routing override at the start of a message: "+large fix the parser".

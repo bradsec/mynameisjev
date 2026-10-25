@@ -66,6 +66,12 @@ async function watch(hookInput) {
     st.putRoute(current, { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null });
     current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
     try { st.writeState(current); } catch (e) { /* the status line just misses one update */ }
+    // A Codex task just spent Codex usage: refresh the cached limits now
+    // rather than up to five minutes later.
+    if (ran.target === 'codex') {
+      const codex = require('./jev-codex');
+      codex.refreshInBackgroundIfStale(codex.readCache(), 0);
+    }
   }
   if (peakPct() < FAST_PATH_PCT) return null;
 
