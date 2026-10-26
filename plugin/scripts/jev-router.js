@@ -35,7 +35,7 @@ const os = require('os');
 const { execFile } = require('child_process');
 const st = require('./jev-state');
 const codex = require('./jev-codex');
-const caveman = require('./jev-caveman');
+const skills = require('./jev-skills');
 const sync = require('./jev-sync');
 const updates = require('./jev-updates');
 const { redact } = require('./jev-redact');
@@ -419,13 +419,31 @@ function subStepAdvice(claude, companion, { review, guided } = {}) {
     : 'Jev: prefer-Codex mode is on. ';
   return why +
     'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
-    `with one Bash call: node "${companion.replace(/\\/g, '/')}" task "<the brief>" (add --write if it should edit files). ` +
+    `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} Add --write if it should edit files. ${RESUME_RULE} ` +
     `${guided ? shortGuide(review) : brief()} ` +
     (review
-      ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ' +
+      ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ' +
         `The exception is small fixes while reviewing what Codex returned.${guided ? '' : ` ${REVIEW}`} `
-      : 'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, heredocs, scripts); batch small edits into one Codex task. ') +
+      : 'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ') +
     `${DIRECT_ASK} Keep your own replies short.`;
+}
+
+// When Codex's model list moves a size tier to another model (jev-codex.js
+// autoTiers), tell the user once. before is the tier models last seen
+// (state.codexModelsSeen). Returns { seen, text } to record when they
+// differ, text null for the first list; null when nothing changed.
+function modelChangeNotice(before, cache) {
+  if (!cache || !Array.isArray(cache.models) || cache.models.length === 0) return null;
+  const seen = Object.fromEntries(Object.entries(codex.autoTiers(cache)).map(([t, c]) => [t, c.model]));
+  if (!before) return { seen, text: null };
+  const changed = Object.keys(seen).filter((t) => before[t] !== seen[t]);
+  if (changed.length === 0) return null;
+  const name = (m) => m || 'the Codex default';
+  return {
+    seen,
+    text: `Jev: Codex's model list changed: ${changed.map((t) => `${t} now uses ${name(seen[t])} (was ${name(before[t])})`).join(', ')}. ` +
+      'Models you set with /mynameisjev:codex set still apply; /mynameisjev:codex show lists them.',
+  };
 }
 
 // User notice once Claude usage crosses a threshold, or null below it. The
@@ -527,24 +545,35 @@ const BRIEF = 'You are the senior developer with the final say, and Codex is a d
   'what it returns is a proposal you accept, fix or reject. Do not pass the user\'s message through as is. ' +
   'Write Codex a short brief: Goal; Context (the files, decisions and findings from this conversation it needs); ' +
   'Constraints (style, scope, what not to touch); Done when; Verify with (the test or check to run). ' +
-  'Tell Codex to work token-efficiently (read only what it needs, terse report), to use its installed skills where they fit ' +
-  '(ponytail for the simplest solution, superpowers for test-first work and debugging, if installed, ' +
-  'and any other skill that saves tokens without lowering the quality of the work), ' +
-  'and to end with the files it changed and the checks it ran. Use your own relevant skills the same way: ' +
-  'superpowers and others where they apply, and any that save tokens without lowering quality.';
+  'Tell Codex to work token-efficiently (read only what it needs, terse report), to use whichever of its installed skills fit ' +
+  'the task (for example ones for the simplest solution, test-first work, debugging or terse output) and any other that ' +
+  'saves tokens without lowering the quality of the work, and to end with the files it changed, the checks it ran, and ' +
+  'Notes for the lead: risks, anything in the brief it disagrees with, and suggestions. If the brief conflicts with the ' +
+  'code, Codex should stop and report the conflict instead of guessing. Work token-efficiently yourself too: keep the brief ' +
+  'and your replies short, read only what you need, and use your own installed skills that fit, especially ones that cut ' +
+  'tokens without lowering the quality of the work.';
 const RTK_BRIEF = 'RTK is installed: tell Codex to prefix its shell commands with rtk (for example rtk git status) to cut command output.';
 // The brief text, with the RTK line only when the rtk CLI is on PATH: Codex
 // has no hook to add the prefix for it.
 const brief = () => (sync.rtkBinary() ? `${BRIEF} ${RTK_BRIEF}` : BRIEF);
 const REVIEW = 'When Codex returns, review its work cheaply: read git diff --stat and the diff of the changed files only, ' +
-  'not whole files, and run the smallest relevant check. Fix small issues yourself (about 10 lines or fewer); ' +
-  'send anything larger back to Codex as a follow-up brief. Then tell the user the outcome in one or two lines.';
+  'not whole files, and run the smallest relevant check. Weigh its Notes for the lead: act on each or tell the user why not. ' +
+  'Fix small issues yourself (about 10 lines or fewer); send anything larger back to Codex as a follow-up brief with --resume-last. ' +
+  'Then tell the user the outcome in one or two lines.';
 const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do the work yourself, do it here instead.';
 // After the first Codex note of a session (or since its last compaction) the
 // full brief and review text is already in Claude's context, so later notes
 // only point back to it (st.guidedFor).
 const shortGuide = (review) => 'As in Jev\'s first Codex note this session: you are the senior developer with the final say; ' +
-  `write Codex a brief (Goal, Context, Constraints, Done when, Verify with)${review ? ', then review its result and fix small issues yourself' : ''}.`;
+  'write Codex a brief (Goal, Context, Constraints, Done when, Verify with) that asks it to work token-efficiently ' +
+  'with the skills that fit and to end with its Notes for the lead; work token-efficiently yourself too' +
+  `${review ? ', then review its result, weigh its notes and fix small issues yourself' : ''}.`;
+
+const taskCommand = (companion, flags) => codex.taskCommand(companion, flags, '<the brief>');
+const STDIN_RULE = `Keep the brief in the quoted heredoc as shown, never as a quoted argument, and put any extra flags before <<'${codex.HEREDOC}'.`;
+// The companion resumes the latest Codex task thread of this Claude session.
+const RESUME_RULE = 'For a follow-up to the last Codex task (a fix, a send-back, an answer to its notes) add --resume-last, ' +
+  'so Codex continues in the same thread with its context; without it each task starts a new thread.';
 
 // opts.review: Claude checks each Codex result and fixes small issues
 // itself. opts.guided: this session already has the full text (shortGuide).
@@ -554,10 +583,10 @@ function codexCall(choice, companion, { review, guided } = {}) {
     choice.effort ? `--effort ${choice.effort}` : null,
   ].filter(Boolean).join(' ');
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
-    // Forward slashes work in Git Bash and PowerShell on Windows too.
-    `node "${companion.replace(/\\/g, '/')}" task ${flags} "<the brief>"\n` +
+    // Forward slashes work in Git Bash on Windows too.
+    `${taskCommand(companion, flags)}\n` +
     `${guided ? shortGuide(review) : brief()}\n` +
-    'Add --write if Codex should edit files. For long multi-step work add --background; it prints a job ID. ' +
+    `${STDIN_RULE} Add --write if Codex should edit files. ${RESUME_RULE} For long multi-step work add --background; it prints a job ID. ` +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
     'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.' +
@@ -717,7 +746,7 @@ function looksSkippable(prompt) {
 // helpers shared with the mid-turn usage watch (jev-usage-watch.js).
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
-  routeAdvice, limitNoticeFor, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
+  routeAdvice, limitNoticeFor, modelChangeNotice, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
   coldCache, coldGuardReason, modelStreak, effortLevel, effortStreak, sessionEffort,
   claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
@@ -773,6 +802,12 @@ function main() {
       const codexCache = codex.readCache();
       codex.refreshInBackgroundIfStale(codexCache);
       codexNow = codexStatus(codexCache);
+      const models = codexNow.available ? modelChangeNotice(state.codexModelsSeen, codexCache) : null;
+      if (models) {
+        state.codexModelsSeen = models.seen;
+        if (models.text) notices.push(models.text);
+        writeState(state);
+      }
       // Started now so it runs alongside the Jev call; awaited in `finally`.
       if (state.autoTransfer && codexNow.available && claude && claude.pct >= AUTO_TRANSFER_PCT && transcriptPath) {
         transfer = autoTransfer(transcriptPath, sessionId, cwd);
@@ -787,12 +822,12 @@ function main() {
       }
 
       // Codex's AGENTS.md is generated locally, cheap enough to keep in sync on
-      // every prompt. Claude-side installs (caveman plugin, RTK hook) are too
-      // slow for this hook, so they only get a once-per-session pointer.
+      // every prompt. RTK hook setup is too slow for this hook, so it only
+      // gets a once-per-session pointer.
       if (state.sync) {
         try {
-          if (sync.syncAgents({ withCaveman: state.caveman }) === 'updated') {
-            notices.push('Jev: regenerated ~/.codex/AGENTS.md to match CLAUDE.md, RTK and caveman. Stop this with /mynameisjev:sync off.');
+          if (sync.syncAgents({ style: skills.outputStyle(state.outputStyle).skill }) === 'updated') {
+            notices.push('Jev: regenerated ~/.codex/AGENTS.md to match CLAUDE.md, RTK and the output-style skill. Stop this with /mynameisjev:sync off.');
           }
         } catch (e) {
           notices.push(`Jev: could not regenerate ~/.codex/AGENTS.md (${e.message}).`);
@@ -810,7 +845,7 @@ function main() {
               `${found.updates.map(updates.describe).join('; ')}. Run /mynameisjev:update to apply.`);
           }
           if (found.missing && found.missing.length > 0) {
-            parts.push(`Not active: ${found.missing.join(', ')}. Run /mynameisjev:sync to install.`);
+            parts.push(`Not on Codex: ${found.missing.join(', ')}. Jev does not install plugins.`);
           }
           state.updatesNoticeAt = found.checkedAt;
           writeState(state);
@@ -819,7 +854,6 @@ function main() {
       }
       if (sessionId && state.setupNoticeSession !== sessionId) {
         const missing = [];
-        if (state.caveman && caveman.claudeStatus() !== 'active') missing.push('the caveman plugin');
         if (state.sync && !sync.rtkClaudeHook()) missing.push("RTK's Claude hook");
         if (missing.length > 0) {
           state.setupNoticeSession = sessionId;

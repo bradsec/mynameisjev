@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // jev-cli — backs the /mynameisjev:* commands: on/off/status, Claude and Codex
 // usage limits, the Codex model per size tier, and the opt-in features
-// (caveman, sync, updates, auto-transfer, status line).
+// (output style, sync, updates, auto-transfer, status line).
 
 const fs = require('fs');
 const path = require('path');
@@ -9,14 +9,16 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const st = require('./jev-state');
 const codex = require('./jev-codex');
-const caveman = require('./jev-caveman');
+const skills = require('./jev-skills');
 const sync = require('./jev-sync');
 const plugins = require('./jev-plugins');
 const updates = require('./jev-updates');
 const tiebreak = require('./jev-tiebreak');
 
 const state = st.readState();
-const [cmd = 'status', ...args] = process.argv.slice(2).map((a) => a.toLowerCase());
+const [command = 'status', ...rawArgs] = process.argv.slice(2);
+const cmd = command.toLowerCase();
+const args = cmd === 'style' ? rawArgs : rawArgs.map((a) => a.toLowerCase());
 const print = (lines) => lines.forEach((l) => console.log(l));
 const onOff = (b) => (b ? 'on' : 'off');
 // Claude Code sets this for commands run in a session; the hooks get the
@@ -24,7 +26,7 @@ const onOff = (b) => (b ? 'on' : 'off');
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
 
 const COMMANDS = {
-  on, off, status, limits, codex: codexCommand, sync: syncCommand, caveman: cavemanCommand,
+  on, off, status, limits, codex: codexCommand, sync: syncCommand, style: styleCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand, review: reviewCommand,
   report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
   decide: decideCommand, check: checkCommand, compare: compareCommand,
@@ -62,7 +64,10 @@ async function on() {
     console.log('WARNING: OPENROUTER_API_KEY is not set in this shell, so the router stays silent. Add it to your shell profile and restart Claude Code.');
   }
   console.log('While on, your message text is sent to OpenRouter/TypeSafe for sizing. Turn it off for private work: /mynameisjev:off');
-  if (state.sync) print(await sync.ensureAll({ withCaveman: state.caveman }));
+  if (state.sync) {
+    const chosen = skills.outputStyle(state.outputStyle);
+    print(await sync.ensureAll({ style: chosen.skill, reason: chosen.reason }));
+  }
 }
 
 async function off() {
@@ -110,19 +115,23 @@ async function status() {
       (state.lastTransfer ? ` (latest: codex resume ${state.lastTransfer.threadId})` : ''));
   }
 
-  console.log(`Features: caveman ${onOff(state.caveman)}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}, tiebreak ${onOff(state.tiebreak)}`);
+  console.log(`Features: output style ${state.outputStyle || 'off'}, sync ${onOff(state.sync)}, daily update check ${onOff(state.updates)}, cold-cache guard ${onOff(state.coldGuard)}, enforce hand-offs ${onOff(state.enforce)}, completeness check ${onOff(state.completeCheck)}, tiebreak ${onOff(state.tiebreak)}`);
   if (state.tiebreak || s.tiebreaks) console.log(`Tiebreak calls: ${s.tiebreaks || 0}`);
   if (state.completeCheck || s.checks) console.log(`Completeness checks: ${s.checks || 0} run, ${s.checkBlocks || 0} continued (${s.checkScope || 0} for edits beyond the request)`);
-  if (state.caveman) console.log(`Caveman: Claude ${caveman.claudeStatus()}${available ? `, Codex ${caveman.codexStatus()}` : ''}`);
+  const style = skills.outputStyle(state.outputStyle);
+  if (state.outputStyle) console.log(`Output style: ${state.outputStyle}, ${style.skill ? style.skill.id : style.reason}, Codex block ${skills.codexStatus()}`);
   if (state.sync) {
     const rtk = sync.rtkStatus();
     const yn = (b) => (b ? 'active' : 'missing');
     console.log(`RTK: binary ${rtk.binary ? 'found' : 'missing'}, Claude hook ${yn(rtk.claudeHook)}${available ? `, Codex rules ${yn(rtk.codexRules)}` : ''}`);
-    if (available) console.log(`Codex AGENTS.md: ${sync.agentsStatus({ withCaveman: state.caveman })}`);
-    for (const p of await plugins.requiredStatus()) {
-      const name = `${p.name[0].toUpperCase()}${p.name.slice(1)}`;
-      const claudeSide = `Claude ${p.claude}${p.claudeVersion ? ` ${p.claudeVersion}` : ''}`;
-      console.log(`${name}: ${claudeSide}${available ? `, Codex ${p.codex}${p.codexVersion ? ` ${p.codexVersion}` : ''}` : ''}`);
+    if (available) console.log(`Codex AGENTS.md: ${sync.agentsStatus({ style: style.skill })}`);
+    // `codex plugin list` takes about half a second, so only with sync on.
+    try {
+      const pairs = await plugins.pluginPairs();
+      if (available && !pairs.length) console.log('Plugins on both sides: none found');
+      pairs.forEach((p) => console.log(`Plugins on both sides: ${plugins.describePair(p)}`));
+    } catch (e) {
+      console.log(`Plugins on both sides: discovery failed (${e.message})`);
     }
   }
   statusLineOverrideWarnings().forEach((w) => console.log(w));
@@ -229,7 +238,7 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
   if (sub === 'reset') {
     state.codexTiers = {};
     st.writeState(state);
-    console.log('Codex tier models reset to defaults.');
+    console.log('Codex tier models reset: picked from the Codex model list again.');
   } else if (sub === 'set') {
     if (!codex.DEFAULT_TIERS[tier]) throw new Error(`tier must be one of: ${Object.keys(codex.DEFAULT_TIERS).join(', ')}`);
     if (!model) throw new Error('usage: /mynameisjev:codex set <tier> <model> [effort]');
@@ -242,7 +251,7 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
   } else if (sub !== 'show') {
     throw new Error('usage: /mynameisjev:codex [show | set <tier> <model> [effort] | reset]');
   }
-  console.log('Codex model per Jev size:');
+  console.log('Codex model per Jev size (picked from the Codex model list unless custom):');
   for (const t of Object.keys(codex.DEFAULT_TIERS)) {
     const c = codex.tierChoice(t, state.codexTiers, cache);
     const asked = codex.tierChoice(t, state.codexTiers, cache, true);
@@ -257,25 +266,28 @@ async function syncCommand([arg]) {
   if (toggle('sync', 'Sync', arg) && !state.sync) return;
   if (arg && arg !== 'on') throw new Error('usage: /mynameisjev:sync [on | off]');
   if (!state.sync) {
-    console.log('Sync is off; turn it on with /mynameisjev:sync on. It generates ~/.codex/AGENTS.md from ~/.claude/CLAUDE.md (replacing the current file, with one backup) and installs missing caveman, superpowers and RTK setup.');
+    console.log('Sync is off; turn it on with /mynameisjev:sync on. It generates ~/.codex/AGENTS.md from ~/.claude/CLAUDE.md (replacing the current file, with one backup), sets up the RTK Claude hook and reports plugins Codex lacks.');
     return;
   }
-  print(await sync.ensureAll({ withCaveman: state.caveman }));
+  const chosen = skills.outputStyle(state.outputStyle);
+  print(await sync.ensureAll({ style: chosen.skill, reason: chosen.reason }));
 }
 
-async function cavemanCommand([arg]) {
-  if (!toggle('caveman', 'Caveman', arg)) {
-    console.log(`Caveman: ${onOff(state.caveman)}. Claude plugin ${caveman.claudeStatus()}${codex.codexAvailable() ? `, Codex ${caveman.codexStatus()}` : ''}. usage: /mynameisjev:caveman [on | off]`);
-    return;
+async function styleCommand([arg]) {
+  if (arg !== undefined) {
+    state.outputStyle = arg === 'off' ? null : arg;
+    st.writeState(state);
   }
-  if (!state.caveman) {
-    const result = state.sync ? sync.syncAgents({ withCaveman: false }) : 'sync off, AGENTS.md unchanged';
-    console.log(`Codex caveman block removed (${result}). The Claude plugin stays installed; disable it with /plugin if wanted.`);
-    return;
+  const chosen = skills.outputStyle(state.outputStyle);
+  console.log(`Output style: ${state.outputStyle || 'off'}`);
+  console.log(`Chosen skill: ${chosen.skill ? chosen.skill.id : chosen.reason}`);
+  const candidates = chosen.candidates || skills.outputStyleCandidates();
+  console.log(`Candidates: ${candidates.length ? candidates.map((s) => s.id).join(', ') : 'none found'}`);
+  if (arg !== undefined) {
+    if (state.sync) console.log(`Codex AGENTS.md: ${sync.syncAgents({ style: chosen.skill })}`);
+    else console.log('Turn on /mynameisjev:sync to mirror it into Codex.');
   }
-  console.log(`Claude ${await caveman.installClaude()}`);
-  if (state.sync) console.log(`Codex AGENTS.md: ${sync.syncAgents({ withCaveman: true })}`);
-  else console.log('Codex: turn on /mynameisjev:sync to add caveman to ~/.codex/AGENTS.md.');
+  console.log(`Codex block: ${skills.codexStatus()}`);
 }
 
 // For a per-session setting: [--default] <value>. Returns { isDefault, value }.
@@ -439,7 +451,7 @@ async function updateCommand([arg]) {
     const r = await updates.runCheck();
     if (r.updates.length === 0) console.log('Everything checked is up to date.');
     r.updates.forEach((u) => console.log(`  ${updates.describe(u)}`));
-    (r.missing || []).forEach((m) => console.log(`  not active: ${m} (run /mynameisjev:sync)`));
+    (r.missing || []).forEach((m) => console.log(`  not active: ${m} (use codex plugin add <id> if wanted)`));
     r.errors.forEach((e) => console.log(`  check failed: ${e}`));
     return;
   }
@@ -447,8 +459,8 @@ async function updateCommand([arg]) {
   const lines = await updates.applyUpdates();
   print(lines);
   if (lines.some((l) => l.startsWith('updated'))) {
-    // A caveman update changes the rules Codex's AGENTS.md is built from.
-    if (state.sync) console.log(`Codex AGENTS.md: ${sync.syncAgents({ withCaveman: state.caveman })}`);
+    // An output-style skill update changes the rules used to build AGENTS.md.
+    if (state.sync) console.log(`Codex AGENTS.md: ${sync.syncAgents({ style: skills.outputStyle(state.outputStyle).skill })}`);
     // Claude Code offers no way for a script or hook to trigger a plugin
     // reload, so this step stays with the user.
     console.log('Claude Code: run /reload-plugins (or restart) to load updated plugins; new sessions load them automatically.');

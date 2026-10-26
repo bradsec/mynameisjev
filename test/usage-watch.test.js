@@ -40,6 +40,11 @@ test('records hand-offs that ran, even below the usage thresholds', async () => 
   assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
 });
 
+test('reads flags from the command line only, not the heredoc brief', () => {
+  const command = 'node "/p/codex-companion.mjs" task --effort low <<\'JEV_BRIEF\'\nGoal: add --background and --model gpt-x support\nJEV_BRIEF';
+  assert.deepStrictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command } }), { target: 'codex', model: 'default', reviewing: true });
+});
+
 test('marks when Codex\'s result is back for review fixes', async () => {
   setState({});
   setUsage(10);

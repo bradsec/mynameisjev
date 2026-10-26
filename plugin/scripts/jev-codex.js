@@ -30,7 +30,9 @@ const LOCK_MAX_AGE_MS = 30 * 1000;
 
 // Mirrors the Claude tiers: fast model for lookups, balanced for everyday
 // work, frontier model for large and hardest. Efforts stay within what the
-// companion's `task --effort` accepts (none..xhigh).
+// companion's `task --effort` accepts (none..xhigh). The models here are a
+// seed: autoTiers picks the current ones from Codex's own model list, so a
+// new Codex model needs no Jev release.
 const DEFAULT_TIERS = {
   tiny: { model: 'gpt-6-luna', effort: 'low' },
   everyday: { model: 'gpt-6.1-sol', effort: 'medium' },
@@ -40,7 +42,16 @@ const DEFAULT_TIERS = {
 const TASK_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 // Models that draw down Codex usage fastest. Jev routes to them only when the
 // user asks: a +codex prefix, or a tier set with /mynameisjev:codex set.
+// Seed only: with a model list, the frontier models found there count.
 const PREMIUM_MODELS = new Set(['gpt-6-astra']);
+
+// How autoTiers reads Codex's model descriptions ("Fast and affordable model
+// for easier tasks.", "Frontier intelligence for the most demanding work.").
+// Codex lists the newest models first, so the first match is the newest.
+const OLD_MODEL = /\b(older|previous|legacy|deprecated)\b/i;
+const FAST_MODEL = /\b(fast|affordable|cheap|efficient|lightweight)\b/i;
+const FRONTIER_MODEL = /\b(frontier|most capable|most intelligent|most demanding|flagship)\b/i;
+const MAX_UPGRADE_HOPS = 5;
 
 function readJson(file) {
   try {
@@ -48,6 +59,16 @@ function readJson(file) {
   } catch (e) {
     return null;
   }
+}
+
+// The companion task command with its prompt on stdin through a quoted
+// heredoc: as a quoted argument, quotes, backticks and $ in a multi-paragraph
+// brief break the command or get expanded by the shell. The companion reads
+// stdin before it starts a --background job. Forward slashes work in Git Bash
+// on Windows too.
+const HEREDOC = 'JEV_BRIEF';
+function taskCommand(companion, flags, placeholder) {
+  return `node "${companion.replace(/\\/g, '/')}" task ${flags ? `${flags} ` : ''}<<'${HEREDOC}'\n${placeholder}\n${HEREDOC}`;
 }
 
 // Newest installed codex plugin's companion script, or null when the plugin
@@ -114,6 +135,9 @@ function queryAppServer() {
           id: m.id,
           description: m.description || '',
           isDefault: !!m.isDefault,
+          // The model Codex suggests in its place, when it has one.
+          upgrade: (m.upgrade && (m.upgrade.id || m.upgrade.model || m.upgrade)) || null,
+          efforts: (m.supportedReasoningEfforts || []).map((e) => e.reasoningEffort).filter(Boolean),
         })),
         limits: {
           ordinaryUsageAllowed: limits ? limits.ordinaryUsageAllowed !== false : false,
@@ -187,29 +211,83 @@ function codexPeak(cache) {
   return peak;
 }
 
-// Model + effort for a tier: user override (state.codexTiers) first, then the
-// defaults. A model missing from Codex's current list is dropped so Codex
-// uses its own default instead of failing on an unknown model.
-// explicit: the user asked for this tier, so its premium default stands.
-// Otherwise a premium default model gives way to the everyday tier's model,
+const listedModels = (cache) => (cache && Array.isArray(cache.models) ? cache.models : []);
+
+// The newest current model whose description matches, or null.
+function newest(models, pattern) {
+  const m = models.find((x) => !OLD_MODEL.test(x.description || '') && pattern.test(x.description || ''));
+  return m ? m.id : null;
+}
+
+// A seed model, moved along Codex's upgrade pointers to a listed model.
+function upgraded(id, models) {
+  const byId = new Map(models.map((m) => [m.id, m]));
+  for (let hops = 0; hops < MAX_UPGRADE_HOPS && byId.get(id) && byId.get(id).upgrade && byId.has(byId.get(id).upgrade); hops++) {
+    id = byId.get(id).upgrade;
+  }
+  return id;
+}
+
+// Each tier's model and effort for Codex's current model list, before user
+// overrides: tiny takes the newest fast model, everyday Codex's default,
+// large and hardest the newest frontier model. A tier no description fits
+// keeps its seed model, following any upgrade Codex lists for it. With no
+// list this is DEFAULT_TIERS.
+function autoTiers(cache) {
+  const models = listedModels(cache);
+  const def = models.find((m) => m.isDefault);
+  const frontier = newest(models, FRONTIER_MODEL);
+  const found = {
+    tiny: newest(models, FAST_MODEL),
+    everyday: def ? def.id : null,
+    large: frontier,
+    hardest: frontier,
+  };
+  const out = {};
+  for (const [tier, seed] of Object.entries(DEFAULT_TIERS)) {
+    out[tier] = { ...seed, model: found[tier] || upgraded(seed.model, models) };
+  }
+  return out;
+}
+
+// Premium models: the frontier models in Codex's list, or the seed set when
+// the list has no descriptions to judge by.
+function premiumModels(cache) {
+  const models = listedModels(cache);
+  const frontier = models.filter((m) => !OLD_MODEL.test(m.description || '') && FRONTIER_MODEL.test(m.description || ''));
+  return frontier.length > 0 ? new Set(frontier.map((m) => m.id)) : PREMIUM_MODELS;
+}
+
+// Model + effort for a tier: user override (state.codexTiers) first, then
+// autoTiers. A model missing from Codex's current list is dropped so Codex
+// uses its own default instead of failing on an unknown model, and so is an
+// effort the model does not list as supported.
+// explicit: the user asked for this tier, so its premium model stands.
+// Otherwise a premium model gives way to the everyday tier's model,
 // keeping this tier's effort.
 function tierChoice(tier, overrides, cache, explicit = false) {
+  const auto = autoTiers(cache);
   const override = (overrides && overrides[tier]) || {};
-  const choice = { ...DEFAULT_TIERS[tier], ...override };
-  if (!explicit && !override.model && PREMIUM_MODELS.has(choice.model) && tier !== 'everyday') {
-    choice.model = { ...DEFAULT_TIERS.everyday, ...((overrides && overrides.everyday) || {}) }.model;
+  const choice = { ...auto[tier], ...override };
+  if (!explicit && !override.model && premiumModels(cache).has(choice.model) && tier !== 'everyday') {
+    choice.model = { ...auto.everyday, ...((overrides && overrides.everyday) || {}) }.model;
   }
-  const listed = cache && Array.isArray(cache.models) ? cache.models.map((m) => m.id) : null;
-  if (listed && listed.length > 0 && !listed.includes(choice.model)) choice.model = null;
+  const models = listedModels(cache);
+  if (models.length > 0 && !models.some((m) => m.id === choice.model)) choice.model = null;
   if (!TASK_EFFORTS.includes(choice.effort)) choice.effort = null;
+  const listed = models.find((m) => m.id === choice.model);
+  if (listed && Array.isArray(listed.efforts) && listed.efforts.length > 0 && !listed.efforts.includes(choice.effort)) choice.effort = null;
   return choice;
 }
 
 module.exports = {
+  HEREDOC,
+  taskCommand,
   codexAvailable,
   DEFAULT_TIERS,
   TASK_EFFORTS,
   PREMIUM_MODELS,
+  autoTiers,
   CACHE_MAX_AGE_MS,
   ACTIVE_MAX_AGE_MS,
   companionPath,

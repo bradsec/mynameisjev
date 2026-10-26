@@ -109,6 +109,9 @@ const DEFAULT_STATE = {
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
   codexTiers: {},
+  // Each tier's Codex model as last picked from Codex's model list, so a
+  // change is announced once (jev-router.js modelChangeNotice).
+  codexModelsSeen: null,
   // 'codex' routes work to Codex first at any Claude usage
   // (`/mynameisjev:prefer --default`); a session's own choice wins (sessions).
   prefer: 'claude',
@@ -125,10 +128,10 @@ const DEFAULT_STATE = {
   // Copy the session into Codex from 90% Claude usage (`/mynameisjev:transfer on`).
   autoTransfer: false,
   lastTransfer: null,
-  // Keep caveman active on Claude and Codex (`/mynameisjev:caveman on`).
-  caveman: false,
-  // Generate ~/.codex/AGENTS.md from CLAUDE.md, keep RTK and required
-  // plugins active on both sides (`/mynameisjev:sync on`).
+  // null off, 'auto', or a skill id; mirrored into Codex's AGENTS.md by /mynameisjev:sync.
+  outputStyle: null,
+  // Generate ~/.codex/AGENTS.md from CLAUDE.md, set up RTK and report
+  // plugin counterparts (`/mynameisjev:sync on`).
   sync: false,
   setupNoticeSession: null,
   // Daily update check (`/mynameisjev:update on`).
@@ -152,6 +155,8 @@ const BASE = Symbol('jev-state-base');
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
 function normalize(parsed) {
+  // Migrate the pre-0.3.20 setting.
+  if (parsed.outputStyle === undefined && parsed.caveman === true) parsed.outputStyle = 'auto';
   return {
     ...DEFAULT_STATE,
     ...parsed,

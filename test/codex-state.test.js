@@ -14,7 +14,8 @@ const codex = require('../plugin/scripts/jev-codex');
 test('defaults: router only, every optional feature off', () => {
   const s = st.readState();
   assert.strictEqual(s.enabled, false);
-  for (const flag of ['caveman', 'sync', 'updates', 'autoTransfer']) assert.strictEqual(s[flag], false, flag);
+  assert.strictEqual(s.outputStyle, null);
+  for (const flag of ['sync', 'updates', 'autoTransfer']) assert.strictEqual(s[flag], false, flag);
 });
 
 test('state lives in ~/.claude/mynameisjev', () => {
@@ -47,8 +48,56 @@ test('tier choice: unasked routing stays off gpt-6-astra unless the user picked 
   assert.strictEqual(codex.tierChoice('large', { everyday: { model: 'gpt-6-luna' } }, cache).model, null, 'falls back to the everyday choice, here unlisted');
 });
 
+// Codex's model/list as of 0.164.0, in its own order (newest first).
+const LIVE = [
+  { id: 'gpt-6.1-sol', description: 'Latest workhorse model for coding and everyday work.', isDefault: true },
+  { id: 'gpt-6-astra', description: 'Frontier intelligence for the most demanding work.' },
+  { id: 'gpt-6-sol', description: 'Previous generation workhorse model.' },
+  { id: 'gpt-6-luna', description: 'Fast and affordable model for easier tasks.' },
+  { id: 'gpt-5.6-sol', description: 'Older generation workhorse model.' },
+  { id: 'gpt-5.6-luna', description: 'Older fast and efficient model.' },
+];
+
+test('auto tiers: today\'s Codex list gives the built-in table', () => {
+  const tiers = codex.autoTiers({ models: LIVE });
+  for (const t of Object.keys(codex.DEFAULT_TIERS)) assert.deepStrictEqual(tiers[t], codex.DEFAULT_TIERS[t], t);
+});
+
+test('auto tiers: a new generation is picked up from the descriptions, older ones skipped', () => {
+  const cache = { models: [
+    { id: 'gpt-7-sol', description: 'Latest workhorse model.', isDefault: true },
+    { id: 'gpt-7-astra', description: 'Frontier intelligence for the most demanding work.' },
+    { id: 'gpt-7-luna', description: 'Fast, cheap model for easy tasks.' },
+    ...LIVE.map((m) => ({ ...m, isDefault: false, description: `Previous generation. ${m.description}` })),
+  ] };
+  assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-7-luna', effort: 'low' });
+  assert.deepStrictEqual(codex.tierChoice('everyday', {}, cache), { model: 'gpt-7-sol', effort: 'medium' });
+  assert.strictEqual(codex.tierChoice('hardest', {}, cache, true).model, 'gpt-7-astra');
+  assert.strictEqual(codex.tierChoice('hardest', {}, cache).model, 'gpt-7-sol', 'the new frontier model counts as premium');
+  assert.strictEqual(codex.tierChoice('tiny', { tiny: { model: 'gpt-6-luna' } }, cache).model, 'gpt-6-luna', 'a user override still wins');
+});
+
+test('auto tiers: follows a model\'s upgrade when no description matches', () => {
+  const cache = { models: [{ id: 'gpt-6-luna', upgrade: 'gpt-6.5-luna' }, { id: 'gpt-6.5-luna', upgrade: null }] };
+  assert.strictEqual(codex.tierChoice('tiny', {}, cache).model, 'gpt-6.5-luna');
+  const loop = { models: [{ id: 'gpt-6-luna', upgrade: 'b' }, { id: 'b', upgrade: 'gpt-6-luna' }] };
+  assert.ok(['gpt-6-luna', 'b'].includes(codex.tierChoice('tiny', {}, loop).model), 'an upgrade loop ends');
+});
+
+test('auto tiers: an effort the model does not support is dropped', () => {
+  const cache = { models: [{ ...LIVE[3], efforts: ['minimal', 'medium'] }] };
+  assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-6-luna', effort: null });
+});
+
 test('codex peak: highest window, reset windows count as 0', () => {
   const now = Date.now() / 1000;
   const cache = { limits: { primary: { usedPercent: 60, resetsAt: now - 10 }, secondary: { usedPercent: 40, resetsAt: now + 1000 } } };
   assert.deepStrictEqual(codex.codexPeak(cache), { pct: 40, window: 'weekly', resetsAt: now + 1000 });
+});
+
+test('migrates legacy output style only when the new setting is absent', () => {
+  for (const [legacy, setting, expected] of [[true, undefined, 'auto'], [false, undefined, null], [true, null, null], [true, 'user', 'user']]) {
+    fs.writeFileSync(path.join(st.dataDir, 'state.json'), JSON.stringify({ caveman: legacy, outputStyle: setting }));
+    assert.strictEqual(st.readState().outputStyle, expected);
+  }
 });

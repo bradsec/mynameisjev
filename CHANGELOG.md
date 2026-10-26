@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.20
+
+- Codex briefs use quoted heredocs, preserving shell-sensitive text, and
+  request files changed, checks run and Notes for the lead. Follow-ups use
+  `--resume-last` to retain task context. Codex stops and reports when the
+  brief conflicts with the code. Claude weighs Codex's notes and works
+  token-efficiently too; later notes in a session keep that rule.
+- Codex notes name skills by role, not by plugin name.
+- Discover installed plugins and skills at runtime instead of hard-coded
+  plugin requirements. Sync reports missing or disabled Codex counterparts
+  without installing or enabling plugins. RTK setup and update checks stay.
+- Pick each size's Codex model from Codex's live model list (newest fast,
+  default and frontier models, by description; upgrade pointers otherwise),
+  so new Codex models need no release. Jev announces a change once. Efforts
+  a model does not support fall back to Codex's default.
+- Replace `/mynameisjev:caveman` with `/mynameisjev:style [auto | off | <skill id>]`.
+  Mirror the selected enabled Claude skill into Codex's managed output-style
+  block. Auto selects only a single persistent terse-output candidate.
+  Migrate the previous enabled style setting to `auto`.
+
 ## 0.3.19
 
 - Claude leads Codex hand-offs as the senior developer with the final say.

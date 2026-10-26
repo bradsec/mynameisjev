@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// jev-plugins — plugins the Jev setup keeps installed and enabled on both
-// sides. Claude Code plugins are checked from its plugin records (fast);
-// Codex plugins through `codex plugin list` (about half a second, so callers
-// avoid it on every prompt).
+// jev-plugins — what is installed on each side, found at run time rather
+// than from a list of plugin names, so renamed, added or removed plugins
+// need no code change. Claude Code plugins are read from its plugin records
+// (fast); Codex plugins through `codex plugin list` (about half a second, so
+// callers avoid it on every prompt). Jev reports what it finds and never
+// installs or enables a plugin.
 
 const fs = require('fs');
 const path = require('path');
@@ -12,18 +14,6 @@ const codex = require('./jev-codex');
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CMD_TIMEOUT_MS = 120000;
-
-// Plugins required on both sides. `claudeMarketplace` is the source to add
-// when the marketplace is missing. Caveman is also listed in jev-caveman.js
-// for its Codex side, which is an AGENTS.md block rather than a plugin.
-const REQUIRED = [
-  {
-    name: 'superpowers',
-    claude: 'superpowers@claude-plugins-official',
-    claudeMarketplace: 'anthropics/claude-plugins-official',
-    codex: 'superpowers@openai-curated-remote',
-  },
-];
 
 function readJson(file) {
   try {
@@ -35,32 +25,19 @@ function readJson(file) {
 
 const run = (cmd, args, opts = {}) => exec.run(cmd, args, { timeout: CMD_TIMEOUT_MS, ...opts });
 
-function claudeInstall(id) {
+// Every installed Claude plugin: [{ id, name, version, installPath, enabled }].
+function claudePlugins() {
   const installed = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
-  const entries = installed && installed.plugins && installed.plugins[id];
-  return Array.isArray(entries) && entries.length > 0 ? entries[0] : null;
-}
-
-// 'active' | 'disabled' | 'missing'
-function claudePluginStatus(id) {
-  if (!claudeInstall(id)) return 'missing';
-  const settings = readJson(path.join(claudeDir, 'settings.json')) || {};
-  return settings.enabledPlugins && settings.enabledPlugins[id] === true ? 'active' : 'disabled';
-}
-
-// Install or enable a Claude plugin. Returns a line describing what was done.
-async function ensureClaudePlugin(id, marketplaceSource) {
-  const status = claudePluginStatus(id);
-  if (status === 'active') return `${id}: active`;
-  if (status === 'disabled') {
-    await run('claude', ['plugin', 'enable', id]);
-    return `${id}: enabled (run /reload-plugins in open sessions)`;
-  }
-  const marketplace = id.split('@')[1];
-  const known = readJson(path.join(claudeDir, 'plugins', 'known_marketplaces.json')) || {};
-  if (!known[marketplace] && marketplaceSource) await run('claude', ['plugin', 'marketplace', 'add', marketplaceSource]);
-  await run('claude', ['plugin', 'install', id]);
-  return `${id}: installed (run /reload-plugins in open sessions)`;
+  const enabled = (readJson(path.join(claudeDir, 'settings.json')) || {}).enabledPlugins || {};
+  return Object.entries((installed && installed.plugins) || {})
+    .filter(([, entries]) => Array.isArray(entries) && entries.length > 0)
+    .map(([id, entries]) => ({
+      id,
+      name: id.split('@')[0],
+      version: entries[0].version || null,
+      installPath: entries[0].installPath || null,
+      enabled: enabled[id] === true,
+    }));
 }
 
 // Map of Codex plugin id -> { status, version } from `codex plugin list`.
@@ -68,7 +45,7 @@ async function codexPlugins() {
   const out = await run('codex', ['plugin', 'list']);
   const map = {};
   for (const line of out.split('\n')) {
-    const m = line.match(/^(\S+@\S+)\s+(installed, enabled|installed, disabled|not installed)\s+(\S+)?/);
+    const m = line.match(/^(\S+@\S+)\s+(installed, enabled|installed, disabled|not installed)(?:\s+(\S+))?(?:\s|$)/);
     if (m) map[m[1]] = { status: m[2], version: m[3] || null };
   }
   return map;
@@ -80,15 +57,6 @@ function codexStatusFrom(map, id) {
   if (!p) return 'unknown';
   if (p.status === 'installed, enabled') return 'active';
   return p.status === 'installed, disabled' ? 'disabled' : 'missing';
-}
-
-async function ensureCodexPlugin(id, map) {
-  const status = codexStatusFrom(map, id);
-  if (status === 'active') return `${id}: active`;
-  if (status === 'unknown') return `${id}: not found in any Codex marketplace`;
-  // `codex plugin add` installs, and re-enables a disabled plugin.
-  await run('codex', ['plugin', 'add', id]);
-  return `${id}: ${status === 'disabled' ? 'enabled' : 'installed'} in Codex`;
 }
 
 // The codex plugin keeps a shared app-server running per workspace, and it
@@ -140,56 +108,44 @@ async function restartCodexRuntime() {
   return `Codex runtime: ${results.join('; ')}`;
 }
 
-// Status of every required plugin on both sides:
-// [{ name, claude, codex, claudeVersion, codexVersion }]. The Codex side is
-// 'n/a' when Codex is not available.
-async function requiredStatus() {
-  let map = null;
-  const available = codex.codexAvailable();
-  if (available) {
-    try { map = await codexPlugins(); } catch (e) { /* Codex failing */ }
+// Plugins enabled in Claude Code whose name also exists in a Codex
+// marketplace, matched by name (the part before @):
+// [{ name, claude: { id, version }, codex: { id, status, version } }], with
+// codex.status 'active' | 'disabled' | 'missing'. A Claude plugin with no
+// Codex counterpart is left out. [] when Codex is not available.
+async function pluginPairs() {
+  if (!codex.codexAvailable()) return [];
+  const map = await codexPlugins();
+  const byName = {};
+  for (const id of Object.keys(map)) {
+    const name = id.split('@')[0];
+    // Several marketplaces may list one name; an installed copy wins.
+    if (!byName[name] || codexStatusFrom(map, id) !== 'missing') byName[name] = id;
   }
-  return REQUIRED.map((p) => {
-    const install = claudeInstall(p.claude);
-    return {
-      name: p.name,
-      claude: claudePluginStatus(p.claude),
-      codex: !available ? 'n/a' : map ? codexStatusFrom(map, p.codex) : 'unknown',
-      claudeVersion: install ? install.version : null,
-      codexVersion: map && map[p.codex] ? map[p.codex].version : null,
-    };
-  });
+  return claudePlugins()
+    .filter((p) => p.enabled && byName[p.name])
+    .map((p) => {
+      const id = byName[p.name];
+      return {
+        name: p.name,
+        claude: { id: p.id, version: p.version },
+        codex: { id, status: codexStatusFrom(map, id), version: map[id].version },
+      };
+    });
 }
 
-// Install or enable every required plugin wherever it is missing.
-async function ensureRequired() {
-  const lines = [];
-  let map = null;
-  if (codex.codexAvailable()) {
-    try { map = await codexPlugins(); } catch (e) { lines.push(`Codex plugins: could not list (${e.message})`); }
-  }
-  let codexChanged = false;
-  for (const p of REQUIRED) {
-    try { lines.push(`Claude ${await ensureClaudePlugin(p.claude, p.claudeMarketplace)}`); } catch (e) { lines.push(`Claude ${p.claude}: ${e.message}`); }
-    if (map) {
-      try {
-        const line = await ensureCodexPlugin(p.codex, map);
-        if (!line.endsWith(': active')) codexChanged = true;
-        lines.push(`Codex ${line}`);
-      } catch (e) { lines.push(`Codex ${p.codex}: ${e.message}`); }
-    }
-  }
-  if (codexChanged) lines.push(await restartCodexRuntime());
-  return lines;
+// One line per plugin pair for /mynameisjev:status and /mynameisjev:sync.
+// Jev does not install: a plugin Codex lacks gets the command to add it.
+function describePair(p) {
+  if (p.codex.status === 'active') return `${p.name}: Claude ${p.claude.version || '?'}, Codex ${p.codex.version || '?'}`;
+  const fix = p.codex.status === 'disabled' ? 'enable it in Codex' : `install with: codex plugin add ${p.codex.id}`;
+  return `${p.name}: Claude ${p.claude.version || '?'}, Codex ${p.codex.status} (${fix})`;
 }
 
 module.exports = {
-  REQUIRED,
-  claudeInstall,
-  claudePluginStatus,
-  ensureClaudePlugin,
+  claudePlugins,
   codexPlugins,
-  requiredStatus,
-  ensureRequired,
+  pluginPairs,
+  describePair,
   restartCodexRuntime,
 };

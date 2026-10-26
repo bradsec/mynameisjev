@@ -89,7 +89,7 @@ test('route: with Claude low, work that needs the conversation gets a sub-step n
   const claude = { pct: 82, window: '5h', resetsAt: 0 };
   const r = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, claude, claudeLow: true }));
   assert.strictEqual(r.codex, true);
-  assert.match(r.note, /Delegate without asking.*Do not make edits yourself/);
+  assert.match(r.note, /Delegate without asking[\s\S]*Do not make edits yourself/);
 });
 
 test('route: with Claude fine, work that needs the conversation stays quiet', () => {
@@ -159,14 +159,22 @@ test('codex notes: Claude writes the brief, has the final say, and reviews when 
   const on = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true }));
   assert.match(on.note, /senior developer with the final say/);
   assert.match(on.note, /Goal; Context .*Done when; Verify with/);
-  assert.match(on.note, /"<the brief>"/);
+  assert.match(on.note, /task --model \S+ --effort \S+ <<'JEV_BRIEF'\n<the brief>\nJEV_BRIEF\n/, 'brief goes on stdin, not as a quoted argument');
   assert.match(on.note, /token-efficiently/);
-  assert.match(on.note, /ponytail .*superpowers .*if installed/);
+  assert.match(on.note, /installed skills .*fit/);
+  assert.doesNotMatch(on.note, /ponytail|superpowers|caveman/i, 'no plugin or skill names');
+  assert.match(on.note, /Notes for the lead/);
+  assert.match(on.note, /conflicts with the code, .*report/);
+  assert.match(on.note, /--resume-last/);
+  assert.match(on.note, /Weigh its Notes for the lead/);
+  assert.match(on.note, /Work token-efficiently yourself too/, 'Claude is held to it as well');
   assert.match(on.note, /saves tokens without lowering the quality/);
   assert.match(on.note, /git diff --stat/);
   assert.match(on.note, /explicitly asks you \(Claude\) to do the work yourself, do it here/);
   const off = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: false }));
   assert.match(off.note, /final say/);
+  assert.match(off.note, /Notes for the lead/);
+  assert.match(off.note, /--resume-last/, 'follow-ups keep the Codex thread without review too');
   assert.doesNotMatch(off.note, /git diff --stat/);
 });
 
@@ -190,6 +198,8 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
   assert.match(steps(true), /exception is small fixes while reviewing/);
   assert.match(steps(true), /final say/);
   assert.match(steps(true), /do it here instead/);
+  assert.match(steps(true), /task <<'JEV_BRIEF'/);
+  assert.doesNotMatch(steps(true), /"<the brief>"/);
   assert.doesNotMatch(steps(false), /small fixes/);
   assert.match(steps(false), /Do not make edits yourself/);
 });
@@ -199,8 +209,12 @@ test('codex notes: full guidance once per session, then a short pointer', () => 
   const short = note({ guided: true });
   assert.match(short, /As in Jev's first Codex note this session/);
   assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
-  assert.match(short, /review its result and fix small issues yourself/);
-  assert.doesNotMatch(short, /git diff --stat|ponytail/);
+  assert.match(short, /review its result, weigh its notes and fix small issues yourself/);
+  assert.match(short, /Notes for the lead/);
+  assert.match(short, /token-efficiently/, 'later notes keep the token rule');
+  assert.match(short, /skills that fit/);
+  assert.match(short, /--resume-last/, 'the command block keeps the follow-up flag');
+  assert.doesNotMatch(short, /git diff --stat|installed skills/);
   assert.ok(short.length < note({ guided: false }).length - 400);
   const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
   assert.match(steps, /As in Jev's first Codex note/);
@@ -367,4 +381,21 @@ test('sessionEffort reads the level the status line saved for the session', () =
   fs.writeFileSync(file, JSON.stringify({ s1: { level: 'high', at: Date.now() } }));
   assert.strictEqual(router.sessionEffort('s1'), 'high');
   assert.strictEqual(router.sessionEffort('s2'), null);
+});
+
+test('codex model notice: silent on the first list and when nothing changed, names changed tiers', () => {
+  const list = (tinyId) => ({ models: [
+    { id: 'gpt-6.1-sol', description: 'Latest workhorse model.', isDefault: true },
+    { id: 'gpt-6-astra', description: 'Frontier intelligence.' },
+    { id: tinyId, description: 'Fast and affordable model.' },
+  ] });
+  assert.strictEqual(router.modelChangeNotice(null, { models: [] }), null, 'no list, nothing to record');
+  const first = router.modelChangeNotice(null, list('gpt-6-luna'));
+  assert.deepStrictEqual(first.seen, { tiny: 'gpt-6-luna', everyday: 'gpt-6.1-sol', large: 'gpt-6-astra', hardest: 'gpt-6-astra' });
+  assert.strictEqual(first.text, null, 'first list is recorded silently');
+  assert.strictEqual(router.modelChangeNotice(first.seen, list('gpt-6-luna')), null);
+  const next = router.modelChangeNotice(first.seen, list('gpt-7-luna'));
+  assert.match(next.text, /^Jev: Codex's model list changed: tiny now uses gpt-7-luna \(was gpt-6-luna\)\./);
+  assert.doesNotMatch(next.text, /everyday/);
+  assert.match(next.text, /\/mynameisjev:codex/);
 });

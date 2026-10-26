@@ -1,5 +1,5 @@
 ---
-description: Opt-in: generate ~/.codex/AGENTS.md from CLAUDE.md and keep caveman, superpowers and RTK active on both sides
+description: Opt-in: generate ~/.codex/AGENTS.md from CLAUDE.md, set up RTK and report plugin counterparts
 argument-hint: [on | off]
 allowed-tools: Bash(node:*)
 disable-model-invocation: true

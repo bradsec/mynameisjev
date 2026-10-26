@@ -14,10 +14,10 @@
 //   latest openai/codex GitHub release.
 // - RTK: version check only; it has no self-update command, so the notice
 //   points to its releases page.
-// - Required plugins (jev-plugins.js) on Codex: `codex plugin list` shows no
+// - Discovered plugin counterparts (jev-plugins.js) on Codex: `codex plugin list` shows no
 //   "latest" version, so a Codex copy counts as behind when it is older than
 //   the Claude copy of the same plugin (which Claude Code auto-updates).
-//   The check also records a required plugin missing on either side.
+//   The check also reports missing or disabled Codex counterparts; it never installs them.
 // Other Codex plugins are left out: there is no documented way to tell
 // whether an installed Codex plugin is behind.
 
@@ -169,15 +169,13 @@ async function checkRtk() {
     : [];
 }
 
-async function checkRequiredPlugins() {
+async function checkPluginPairs() {
   const updates = [];
   const missing = [];
-  for (const s of await plugins.requiredStatus()) {
-    const p = plugins.REQUIRED.find((r) => r.name === s.name);
-    if (s.claude !== 'active') missing.push(`${s.name} (Claude: ${s.claude})`);
-    if (s.codex !== 'active' && s.codex !== 'n/a') missing.push(`${s.name} (Codex: ${s.codex})`);
-    if (s.codex === 'active' && s.claudeVersion && s.codexVersion && newer(s.codexVersion, s.claudeVersion)) {
-      updates.push({ kind: 'plugin', name: `${p.codex} (Codex)`, current: s.codexVersion, latest: s.claudeVersion, apply: ['codex', ['plugin', 'add', p.codex]] });
+  for (const p of await plugins.pluginPairs()) {
+    if (p.codex.status !== 'active') missing.push(`${p.name} (Codex: ${p.codex.status}, codex plugin add ${p.codex.id})`);
+    if (p.codex.status === 'active' && p.claude.version && p.codex.version && newer(p.codex.version, p.claude.version)) {
+      updates.push({ kind: 'plugin', name: `${p.codex.id} (Codex)`, current: p.codex.version, latest: p.claude.version, apply: ['codex', ['plugin', 'add', p.codex.id]] });
     }
   }
   return { updates, missing };
@@ -191,11 +189,11 @@ async function runCheck() {
   result.updates.push(...plugins.updates);
   result.errors.push(...plugins.errors);
   try {
-    const required = await checkRequiredPlugins();
-    result.updates.push(...required.updates);
-    result.missing = required.missing;
+    const pairs = await checkPluginPairs();
+    result.updates.push(...pairs.updates);
+    result.missing = pairs.missing;
   } catch (e) {
-    result.errors.push(`required plugins: ${e.message}`);
+    result.errors.push(`plugin counterparts: ${e.message}`);
   }
   const cliChecks = [['RTK', checkRtk]];
   if (codex.codexAvailable()) cliChecks.unshift(['Codex CLI', checkCodexCli]);

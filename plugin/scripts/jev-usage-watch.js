@@ -60,8 +60,10 @@ function handOff(hookInput) {
   const input = hookInput.tool_input || {};
   const command = shellCommand(hookInput);
   if (/codex-companion\.mjs"?\s+task\b/.test(command)) {
-    const model = command.match(/--model\s+"?([\w.-]+)/);
-    return { target: 'codex', model: model ? model[1] : 'default', reviewing: !/\s--background\b/.test(command) };
+    // Flags sit before the heredoc; the brief after it may mention them.
+    const line = command.split('<<')[0];
+    const model = line.match(/--model\s+"?([\w.-]+)/);
+    return { target: 'codex', model: model ? model[1] : 'default', reviewing: !/\s--background\b/.test(line) };
   }
   if (hookInput.tool_name === 'Agent' && HELPER_MODELS[input.subagent_type]) {
     return { target: 'claude', model: HELPER_MODELS[input.subagent_type] };

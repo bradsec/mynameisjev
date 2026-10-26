@@ -36,7 +36,7 @@ function guard(hookInput, state, nowMs, companion) {
       permissionDecision: 'deny',
       permissionDecisionReason:
         'Jev: this message is routed to Codex, so file edits go to Codex, not Claude (/mynameisjev:enforce off stops this). ' +
-        `Send the edit with one Bash call: node "${companion.replace(/\\/g, '/')}" task --write "<the change, with the file paths and context it needs>". ` +
+        `Send the edit with one Bash call, keeping the brief in the quoted heredoc:\n${codex.taskCommand(companion, '--write', '<the change, with the file paths and context it needs>')}\n` +
         'Do not make the edit through Bash commands instead.' +
         (review ? ' Small review fixes are allowed once Codex\'s result is back.' : '') +
         ' If the user explicitly asked you to do this yourself, tell them to resend it starting with "+claude".',

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // jev-sync — keeps Codex's instructions matched to Claude's. Generates
-// ~/.codex/AGENTS.md from ~/.claude/CLAUDE.md, and checks that caveman, RTK
-// and the required plugins (jev-plugins.js) are active on both sides.
+// ~/.codex/AGENTS.md from ~/.claude/CLAUDE.md, sets up RTK and reports
+// installed plugin counterparts without installing or enabling plugins.
 //
 // Generation rules:
 // - The "# CLAUDE.md" title becomes "# AGENTS.md".
@@ -12,13 +12,13 @@
 //   one, so Codex can have its own variant (its RTK.md tells the agent to
 //   prefix commands with `rtk`, which Claude gets from a hook instead).
 // - ~/.codex/AGENTS.local.md, if present, is appended for Codex-only rules.
-// - The caveman block (jev-caveman.js) goes last, unless caveman is off.
+// - The selected output-style skill block goes last, when set.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const exec = require('./jev-exec');
-const caveman = require('./jev-caveman');
+const skills = require('./jev-skills');
 const plugins = require('./jev-plugins');
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -65,7 +65,7 @@ const tilde = (p) => p.replace(os.homedir(), '~');
 
 // The AGENTS.md text generated from the current sources, or null when
 // CLAUDE.md is missing.
-function buildAgents({ withCaveman = true } = {}) {
+function buildAgents({ style = null } = {}) {
   const claudeMd = readText(claudeMdPath);
   if (claudeMd === null) return null;
 
@@ -86,7 +86,7 @@ function buildAgents({ withCaveman = true } = {}) {
   const parts = [HEADER, body];
   const local = readText(localPath);
   if (local && local.trim()) parts.push(`<!-- jev-include: AGENTS.local.md -->\n${local.trim()}\n<!-- jev-include-end -->`);
-  if (withCaveman) parts.push(caveman.codexBlock());
+  if (style) parts.push(skills.codexBlock(style));
   return `${parts.join('\n\n')}\n`;
 }
 
@@ -144,21 +144,17 @@ function ensureRtkClaude() {
     .catch((e) => `RTK Claude hook: install failed (${e.message})`);
 }
 
-// Everything `/mynameisjev:sync` checks and repairs: caveman, the required plugins
-// (jev-plugins.js) on both sides, RTK, and AGENTS.md. Returns report lines.
-async function ensureAll({ withCaveman = true } = {}) {
-  const lines = [];
-  if (withCaveman) {
-    try {
-      lines.push(`Claude ${await caveman.installClaude()}`);
-    } catch (e) {
-      lines.push(`Claude caveman: ${e.message}`);
-    }
+// Set up RTK, generate AGENTS.md and report discovered plugins. No plugin installs.
+async function ensureAll({ style = null, reason = 'off' } = {}) {
+  const lines = [`Output style for Codex: ${style ? style.id : `none (${reason})`}`];
+  try {
+    lines.push(...(await plugins.pluginPairs()).map(plugins.describePair));
+  } catch (e) {
+    lines.push(`Plugin discovery: ${e.message}`);
   }
-  lines.push(...(await plugins.ensureRequired()));
   lines.push(await ensureRtkClaude());
   try {
-    const result = syncAgents({ withCaveman });
+    const result = syncAgents({ style });
     lines.push(`Codex AGENTS.md: ${result === 'updated' ? `regenerated from CLAUDE.md (previous version in ${tilde(backupPath)})` : result}`);
   } catch (e) {
     lines.push(`Codex AGENTS.md: could not write (${e.message})`);

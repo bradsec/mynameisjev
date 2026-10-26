@@ -13,7 +13,7 @@ test('blocks Claude\'s own file edits while the message is routed to Codex', () 
     const out = guard(call({ tool_name }), state(), now, companion);
     assert.strictEqual(out.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /codex-companion\.mjs" task/);
-    assert.match(out.hookSpecificOutput.permissionDecisionReason, /--write/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /task --write <<'JEV_BRIEF'\n/);
   }
   const ran = guard(call(), state({ route: route({ model: 'gpt-6-sol', how: 'ran' }) }), now, companion);
   assert.strictEqual(ran.hookSpecificOutput.permissionDecision, 'deny', 'still Codex after one step ran');

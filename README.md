@@ -245,7 +245,7 @@ lists this session's jobs on demand.
 | `/mynameisjev:review` | `on` (default) or `off`: Claude reviews Codex's work and makes small fixes itself, in this session; `--default` sets new sessions |
 | `/mynameisjev:statusline` | `install` Jev's status line, `wrap [--with-jev]` your own, or `uninstall` |
 | `/mynameisjev:sync` | Opt-in, see below |
-| `/mynameisjev:caveman` | Opt-in, see below |
+| `/mynameisjev:style` | Opt-in, see below |
 | `/mynameisjev:transfer` | Opt-in, see below |
 | `/mynameisjev:update` | Opt-in, see below |
 
@@ -381,7 +381,17 @@ used because a leading `!` runs a shell command in Claude Code.
 Codex tasks run through the Codex plugin's own script with one Bash call, not
 through its `codex:codex-rescue` agent, which itself runs on Claude.
 
-Default Codex models per size (change with `/mynameisjev:codex set`):
+Jev picks the Codex model for each size from Codex's own model list, which
+it refreshes every 5 minutes, so new Codex models need no Jev update. It reads
+each model's description: tiny gets the newest fast model, everyday the model
+Codex marks as default, large and hardest the newest frontier model. Models
+described as older or previous generation are skipped. A size no description
+fits keeps the model below, moved to its replacement when Codex lists one.
+Jev tells you once when a size moves to another model. Models you set with
+`/mynameisjev:codex set` always win; `/mynameisjev:codex show` lists the
+current picks.
+
+With Codex's list as of October 2026 the picks are:
 
 | Size | Codex model | With `+codex:<size>` | Effort |
 | --- | --- | --- | --- |
@@ -390,11 +400,12 @@ Default Codex models per size (change with `/mynameisjev:codex set`):
 | large | `gpt-6.1-sol` | `gpt-6-astra` | medium |
 | hardest | `gpt-6.1-sol` | `gpt-6-astra` | high |
 
-`gpt-6-astra` uses Codex quota fastest, so Jev picks it only when you ask:
+Frontier models such as `gpt-6-astra` use Codex quota fastest, so Jev picks them only when you ask:
 a `+codex:large` or `+codex:hardest` prefix, or a tier set to it with
 `/mynameisjev:codex set`.
 
-Models missing from your Codex account's list fall back to Codex's default.
+Models missing from your Codex account's list fall back to Codex's default,
+and so does an effort the chosen model does not support.
 
 ### Claude leads, Codex builds
 
@@ -403,14 +414,13 @@ developer on its team. For every Codex hand-off the router tells Claude not
 to pass your message through as is, but to write Codex a short brief: goal,
 the context from this conversation it needs, constraints, what done means,
 and the check to run. The brief asks Codex to work token-efficiently, to use
-its installed skills where they fit (ponytail for the simplest solution,
-superpowers for test-first work and debugging, if installed, and any other
-skill that saves tokens without lowering the quality of the work), and to end
-with the files it changed and the checks it ran. With the `rtk` CLI on your
-`PATH`, the brief also tells Codex to prefix its shell commands with `rtk`.
-Claude uses its own skills
-the same way: superpowers and others where they apply, and any that save
-tokens without lowering quality.
+its installed skills where they fit, including skills for simple solutions,
+test-first work and debugging, and any that save tokens without lowering
+quality. Codex ends with files changed, checks run and Notes for the lead.
+With the `rtk` CLI on your `PATH`, the brief also tells Codex to prefix its
+shell commands with `rtk`. Claude uses its own installed skills the same way.
+Codex briefs use a quoted heredoc to preserve shell-sensitive text.
+Follow-ups use `--resume-last` to keep the task's context.
 
 The first Codex note in a session carries this guidance in full; later notes
 point back to it in one line, so it isn't repeated in context on every
@@ -528,8 +538,8 @@ All off by default, because each one changes things outside the plugin.
 
 | Feature | Turn on | What it changes |
 | --- | --- | --- |
-| Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), and installs caveman, superpowers and RTK's Claude hook where missing |
-| Caveman | `/mynameisjev:caveman on` | Installs the [caveman](https://github.com/JuliusBrussee/caveman) plugin in Claude Code and, with sync on, adds its rules to Codex |
+| Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), sets up RTK's Claude hook where missing, and reports plugins Codex lacks |
+| Output style | `/mynameisjev:style auto` or `/mynameisjev:style <skill id>` | With sync on, mirrors an installed, enabled Claude skill into Codex's `AGENTS.md`. Use `off` to remove it |
 | Enforce hand-offs | `/mynameisjev:enforce on` | When Jev suggested a Claude helper for the message, a general-purpose subagent that Claude starts without choosing a model runs on that helper's model and effort (an effort Claude chose stays). Named agents, calls that choose a model, Codex routes and other sessions are left alone, and permission prompts are unchanged. When the message is routed to Codex (the whole task, or `→ codex steps` near the limit), Claude's own Edit, Write and NotebookEdit calls are denied with the Codex companion command, so edits use Codex's quota. Edits through Bash are not blocked; the note tells Claude not to make them. Send `+claude` to lift it for a message |
 | Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
 | Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Jev's status line shows `guard armed` next to the cold cache when the next message would be blocked. Needs the status line, which records the cache state |
@@ -538,6 +548,21 @@ All off by default, because each one changes things outside the plugin.
 | Update check | `/mynameisjev:update on` | Checks daily (in the background) for updates to third-party Claude plugins, the Codex CLI and RTK, and tells you. `/mynameisjev:update` applies them |
 
 ### Sync details
+
+Jev discovers enabled Claude plugins and matches their names against Codex's
+marketplaces. It reports versions and missing or disabled counterparts.
+Jev never installs or enables plugins. Missing counterparts get a
+`codex plugin add <id>` command you can run yourself.
+
+`/mynameisjev:style` shows the setting, chosen skill, candidates and Codex block
+status. `auto` selects a single installed skill whose description promises
+terse output that stays on. No match leaves it off; several matches require
+an explicit skill id. Alias variants with `disable-model-invocation: true`
+are excluded from auto selection. User skills in `~/.claude/skills` are also
+available, including symlinks. Only enabled plugins supply plugin skills.
+An explicit id can select any available skill. Sync copies its body without
+frontmatter into the managed output-style block; it does not activate a
+Claude skill. `/mynameisjev:style off` removes the block when sync is on.
 
 The generated `AGENTS.md`:
 
@@ -549,6 +574,7 @@ The generated `AGENTS.md`:
   have its own variant (for example an `RTK.md` that tells Codex to prefix
   commands with `rtk`)
 - appends `~/.codex/AGENTS.local.md` for Codex-only rules
+- appends the selected output-style skill, when set
 - is regenerated on your next prompt whenever the sources change
 
 ## Platform notes
