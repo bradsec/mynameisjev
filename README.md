@@ -460,7 +460,9 @@ Codex is near its limit. The status line shows `codex-first` while it's on;
 setting; `/mynameisjev:prefer --default codex` makes Codex first for new
 sessions. A session's own choice wins over the project file below, which
 wins over the default. `/clear` starts a new session; its `prefer` and
-`review` settings carry over to it.
+`review` settings carry over to it. When two sessions in the same directory
+are cleared within a minute of each other, Jev cannot tell which new session
+belongs to which, so both start with the defaults.
 
 Claude Code's own conversation always runs on a Claude model. To leave Claude
 out entirely, continue in the Codex CLI (`/codex:transfer`, then

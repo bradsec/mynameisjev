@@ -135,9 +135,9 @@ const DEFAULT_STATE = {
   // { <session>: { at, prefer?, review?, guided?, coldGuardKey? } }, newest MAX_ROUTE_SESSIONS
   // kept; guided is set by the router (guidedFor).
   sessions: {},
-  // The session /clear just ended, for jev-session.js to carry its
-  // settings to the new one: { from, cwd, at }.
-  clearCarry: null,
+  // Sessions /clear just ended, for jev-session.js to carry their settings
+  // to the new ones: { <from>: { cwd, at } }.
+  clearCarry: {},
   // Copy the session into Codex from 90% Claude usage (`/mynameisjev:transfer on`).
   autoTransfer: false,
   lastTransfer: null,
@@ -180,6 +180,8 @@ function normalize(parsed) {
     costs: { ...(parsed.costs || {}) },
     routes: { ...(parsed.routes || {}) },
     sessions: { ...(parsed.sessions || {}) },
+    // Pre-0.3.22 state held one { from, cwd, at }; its entries are not maps.
+    clearCarry: Object.fromEntries(Object.entries(parsed.clearCarry || {}).filter(([, v]) => isPlainObject(v))),
   };
 }
 

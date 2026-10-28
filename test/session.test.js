@@ -24,7 +24,7 @@ test('/clear carries prefer and review to the new session, not guidance', () => 
   assert.strictEqual(st.preferFor(s, 'new', null), 'codex');
   assert.strictEqual(st.reviewFor(s, 'new'), false);
   assert.strictEqual(st.guidedFor(s, 'new', false), false, 'new context needs the full text');
-  assert.strictEqual(s.clearCarry, null);
+  assert.deepStrictEqual(s.clearCarry, {});
 });
 
 test('no carry across directories, after the time limit, or for other end reasons', () => {
@@ -38,7 +38,7 @@ test('no carry across directories, after the time limit, or for other end reason
   assert.strictEqual(st.preferFor(s, 'new', null), 'claude');
   s = fresh();
   assert.strictEqual(handle('end', { session_id: 'old', reason: 'logout' }, s, now), false);
-  assert.strictEqual(s.clearCarry, null);
+  assert.deepStrictEqual(s.clearCarry, {});
 });
 
 test('compaction resets the guidance so the next Codex note is full', () => {
@@ -47,4 +47,25 @@ test('compaction resets the guidance so the next Codex note is full', () => {
   assert.strictEqual(st.guidedFor(s, 'old', false), false);
   assert.strictEqual(st.preferFor(s, 'old', null), 'codex', 'settings stay');
   assert.strictEqual(handle('start', { session_id: 'old', source: 'compact' }, s, now), false, 'nothing to reset');
+});
+
+test('two /clears in one directory before either new session starts carry nothing', () => {
+  const s = fresh();
+  st.putSessionSetting(s, 'other', 'prefer', 'codex');
+  handle('end', { session_id: 'old', reason: 'clear', cwd: '/p' }, s, now);
+  handle('end', { session_id: 'other', reason: 'clear', cwd: '/p' }, s, now + 10);
+  handle('start', { session_id: 'new1', source: 'clear', cwd: '/p' }, s, now + 20);
+  handle('start', { session_id: 'new2', source: 'clear', cwd: '/p' }, s, now + 30);
+  assert.strictEqual(st.preferFor(s, 'new1', null), 'claude');
+  assert.strictEqual(st.reviewFor(s, 'new1'), true);
+  assert.strictEqual(st.preferFor(s, 'new2', null), 'claude');
+  assert.strictEqual(st.reviewFor(s, 'new2'), true);
+});
+
+test('a /clear in another directory does not block the carry', () => {
+  const s = fresh();
+  handle('end', { session_id: 'old', reason: 'clear', cwd: '/p' }, s, now);
+  handle('end', { session_id: 'other', reason: 'clear', cwd: '/q' }, s, now + 10);
+  handle('start', { session_id: 'new', source: 'clear', cwd: '/p' }, s, now + 20);
+  assert.strictEqual(st.preferFor(s, 'new', null), 'codex');
 });
