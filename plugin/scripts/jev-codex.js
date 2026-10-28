@@ -70,7 +70,8 @@ function readJson(file) {
 function taskCommand(companion, flags, placeholder) {
   let delimiter;
   do { delimiter = `JEV_BRIEF_${crypto.randomBytes(3).toString('hex')}`; } while (placeholder.split('\n').includes(delimiter));
-  return `jev_err=$(mktemp) || exit $?\nnode "${companion.replace(/\\/g, '/')}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -ne 0 ]; then tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
+  const script = companion.replace(/\\/g, '/').replace(/["`$]/g, '\\$&');
+  return `jev_err=$(mktemp) || exit $?\nnode "${script}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -ne 0 ]; then tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
 }
 
 // Newest installed codex plugin's companion script, or null when the plugin

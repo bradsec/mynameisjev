@@ -26,6 +26,13 @@ test('task command hides progress, prints fatal stderr, and keeps its exit code'
   assert.deepStrictEqual([failed.status, failed.stderr], [7, 'progress\n']);
 });
 
+test('task command handles shell metacharacters in the companion path', () => {
+  const script = path.join(tmp, "companion '$HOME'.mjs");
+  fs.writeFileSync(script, 'process.stdout.write("ok")');
+  const result = spawnSync('bash', ['-c', codex.taskCommand(script, '', 'brief')], { encoding: 'utf8' });
+  assert.deepStrictEqual([result.status, result.stdout, result.stderr], [0, 'ok', '']);
+});
+
 test('defaults: router only, every optional feature off', () => {
   const s = st.readState();
   assert.strictEqual(s.enabled, false);
