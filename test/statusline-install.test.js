@@ -116,3 +116,11 @@ test('wrap --with-jev, and unknown flags are refused', () => {
   assert.strictEqual(state().statusLineJev, false);
   assert.match(run('install', '--with-jev'), /usage: /);
 });
+
+test('install keeps the full path when home is only a text prefix of it', { skip: process.platform === 'win32' }, () => {
+  reset();
+  const home = path.join(tmp, 'cl');
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex'), CLAUDE_PROJECT_DIR: project, HOME: home, USERPROFILE: home };
+  execFileSync(process.execPath, [cli, 'statusline', 'install'], { env, cwd: project });
+  assert.strictEqual(settings().statusLine.command, `node "${path.join(claudeDir, 'mynameisjev', 'statusline.js')}"`);
+});

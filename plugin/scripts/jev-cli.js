@@ -488,7 +488,7 @@ async function statuslineCommand([arg, flag]) {
   const home = os.homedir();
   const command = process.platform === 'win32'
     ? `node "${launcher.replace(/\\/g, '/')}"`
-    : `node "${launcher.startsWith(home) ? `$HOME${launcher.slice(home.length)}` : launcher}"`;
+    : `node "${launcher.startsWith(home + path.sep) ? `$HOME${launcher.slice(home.length)}` : launcher}"`;
   const current = settings.statusLine || null;
   const installed = !!current && current.command === command;
   // The user's own status line: the saved one while ours is installed.
