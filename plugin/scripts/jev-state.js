@@ -96,7 +96,8 @@ const DEFAULT_STATE = {
   // Messages in a row scored off the session's effort (jev-router effortStreak).
   effortStreak: null,
   // Block the first message after the prompt cache went cold on a large
-  // context (`/mynameisjev:coldguard on`), once per expiry (coldGuardKey).
+  // context (`/mynameisjev:coldguard on`), once per expiry. Older state uses coldGuardKey;
+  // new blocks use sessions[session].coldGuardKey so sessions do not reblock each other.
   coldGuard: false,
   coldGuardKey: null,
   // Check at each stop that the reply covers every part of the request,
@@ -131,7 +132,7 @@ const DEFAULT_STATE = {
   // (`/mynameisjev:review --default`); a session's own choice wins.
   review: true,
   // Per-session settings from `/mynameisjev:prefer` and `/mynameisjev:review`:
-  // { <session>: { at, prefer?, review?, guided? } }, newest MAX_ROUTE_SESSIONS
+  // { <session>: { at, prefer?, review?, guided?, coldGuardKey? } }, newest MAX_ROUTE_SESSIONS
   // kept; guided is set by the router (guidedFor).
   sessions: {},
   // The session /clear just ended, for jev-session.js to carry its

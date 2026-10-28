@@ -27,7 +27,7 @@ global.fetch = async (url, opts) => {
 };
 `);
 
-function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = false, size } = {}) {
+function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = false, size, session = 's1' } = {}) {
   if (!keepState) fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true, ...over }));
   const cfg = path.join(project, '.claude', 'mynameisjev.json');
   if (config === undefined) fs.rmSync(cfg, { force: true });
@@ -37,7 +37,7 @@ function run(prompt, { key = 'sk-test', config, state: over = {}, keepState = fa
   delete env.OPENROUTER_API_KEY;
   if (key) env.OPENROUTER_API_KEY = key;
   if (size) env.JEV_STUB_SIZE = JSON.stringify(size);
-  const input = JSON.stringify({ prompt, session_id: 's1', cwd: project });
+  const input = JSON.stringify({ prompt, session_id: session, cwd: project });
   const out = execFileSync(process.execPath, ['--require', stub, script], { input, env }).toString();
   const bodies = fs.existsSync(sent) ? fs.readFileSync(sent, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
   const state = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
@@ -120,6 +120,19 @@ test('cold-cache guard blocks once per expiry, never slash commands, only when o
 
   const slash = run('/compact keep the API notes', { state: { coldGuard: true } });
   assert.strictEqual(slash.out.decision, undefined);
+  fs.rmSync(path.join(dataDir, 'prompt-cache.json'));
+});
+
+test('cold-cache guard does not reblock one session after another blocks', () => {
+  const expired = Math.floor(Date.now() / 1000) - 600;
+  fs.writeFileSync(path.join(dataDir, 'prompt-cache.json'), JSON.stringify({
+    s1: { expires_at: expired, ttl: '5m', recache: 150000 },
+    s2: { expires_at: expired, ttl: '5m', recache: 150000 },
+  }));
+  const msg = 'Write a short email to my landlord about the faucet.';
+  assert.strictEqual(run(msg, { state: { coldGuard: true } }).out.decision, 'block');
+  assert.strictEqual(run(msg, { keepState: true, session: 's2' }).out.decision, 'block');
+  assert.strictEqual(run(msg, { keepState: true }).out.decision, undefined);
   fs.rmSync(path.join(dataDir, 'prompt-cache.json'));
 });
 

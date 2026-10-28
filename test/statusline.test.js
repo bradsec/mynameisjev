@@ -205,6 +205,7 @@ test('cold-cache guard shows armed until it has blocked this cold spell', () => 
   const input = { ...busy, session_id: 's9', prompt_cache: { caching_observed: true, warm: false, expires_at: past, recache_tokens_if_cold: 150000 } };
   assert.match(plain(render({ enabled: true, coldGuard: true }, input)), /cold re-cache 150\.0k guard armed/);
   assert.doesNotMatch(plain(render({ enabled: true, coldGuard: true, coldGuardKey: `s9:${past}` }, input)), /guard armed/);
+  assert.doesNotMatch(plain(render({ enabled: true, coldGuard: true, sessions: { s9: { coldGuardKey: `s9:${past}` } } }, input)), /guard armed/);
   assert.doesNotMatch(plain(render({ enabled: true }, input)), /guard armed/);
   const small = { ...input, prompt_cache: { ...input.prompt_cache, recache_tokens_if_cold: 5000 } };
   assert.doesNotMatch(plain(render({ enabled: true, coldGuard: true }, small)), /guard armed/);

@@ -795,8 +795,8 @@ function main() {
       // commands pass, so /compact and /clear always work.
       if (state.coldGuard && sessionId && !prompt.startsWith('/')) {
         const cold = coldCache(sessionId, Date.now() / 1000);
-        if (cold && state.coldGuardKey !== cold.key) {
-          state.coldGuardKey = cold.key;
+        if (cold && state.sessions[sessionId]?.coldGuardKey !== cold.key && state.coldGuardKey !== cold.key) {
+          st.putSessionSetting(state, sessionId, 'coldGuardKey', cold.key);
           writeState(state);
           output.decision = 'block';
           output.reason = coldGuardReason(cold);

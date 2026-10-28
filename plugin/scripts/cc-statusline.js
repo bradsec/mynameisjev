@@ -218,7 +218,8 @@ function coldGuardArmed(state, session, pc) {
     }
   }
   return Number.isFinite(expires) && Number.isFinite(pc.recache_tokens_if_cold) &&
-    pc.recache_tokens_if_cold >= COLD_GUARD_TOKENS && state.coldGuardKey !== `${session}:${expires}`;
+    pc.recache_tokens_if_cold >= COLD_GUARD_TOKENS &&
+    state.sessions?.[session]?.coldGuardKey !== `${session}:${expires}` && state.coldGuardKey !== `${session}:${expires}`;
 }
 
 // ── Wrap mode ─────────────────────────────────────────────────────────────────
