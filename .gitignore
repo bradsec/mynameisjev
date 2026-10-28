@@ -1,3 +1,15 @@
 node_modules/
 *.log
 .DS_Store
+.env
+.env.*
+!.env.example
+.cache/
+coverage/
+.nyc_output/
+.idea/
+.vscode/
+.cursor/
+.codex/
+.aider*
+.claude/settings.local.json
