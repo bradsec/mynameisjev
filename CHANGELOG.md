@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Read a Codex job's log only from inside its workspace, even through a
+  symlink. Escape `$`, `"` and backticks in the companion path of the
+  generated Codex task command.
+- Track the cold-cache guard per session, so a block in one session no
+  longer re-arms it in another.
+- `/clear` no longer carries one session's `prefer` and `review` to another
+  session's replacement: when two sessions in one directory are cleared
+  within a minute, both new sessions start with the defaults.
+- `/mynameisjev:statusline install` writes `$HOME` only for paths inside the
+  home directory, not paths that merely start with its name.
+- `jev-codex-jobs.js watch` reads the job log in 64 KiB chunks instead of
+  all unread bytes at once.
+- Ignore env files, caches, and IDE and AI tool files.
+
 ## 0.3.21
 
 - Close redaction gaps for Basic auth, npm tokens, credentialed URLs and
