@@ -137,3 +137,13 @@ test('status line shows this session\'s running task on its own line', () => {
   const after = render('sess').split('\n');
   assert.strictEqual(after[after.length - 1], 'CODEX TASK failed after 1m00s · /codex:result s1');
 });
+
+test('watch reads a long log in chunks without splitting lines or characters', async () => {
+  const filler = `[${ago(5000)}] Running command: ${'é'.repeat(50)}\n`.repeat(20);
+  fs.writeFileSync(logPath('w3'), `${filler}[${ago(1000)}] Assistant message captured: héllo after chunks.\n`);
+  writeJobs([{ id: 'w3', sessionId: 's1', status: 'completed', pid: null, startedAt: ago(10000), completedAt: ago(0), logFile: logPath('w3') }]);
+  const out = [];
+  assert.strictEqual(await jobs.watch('w3', { pollMs: 20, chunkBytes: 7, write: (l) => out.push(l) }), 0);
+  assert.strictEqual(out[0], 'Assistant message captured: héllo after chunks.');
+  assert.strictEqual(out.length, 2);
+});

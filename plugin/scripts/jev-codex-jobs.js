@@ -16,12 +16,16 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { StringDecoder } = require('string_decoder');
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const ACTIVE = new Set(['queued', 'running']);
 // A finished job stays on the status line this long, so its end is not missed.
 const FINISHED_SHOW_MS = 5 * 60 * 1000;
 const WATCH_POLL_MS = 2000;
+// The log is read this much at a time, so a long job's log is never held whole.
+const WATCH_CHUNK_BYTES = 64 * 1024;
+const WATCH_PARTIAL_CHARS = 4096;
 // Log lines worth waking Claude for. Command and file-change lines repeat
 // dozens of times per task; Codex's own messages summarise them.
 const WATCH_LINE = /^(Assistant message captured|Applying \d+ file change|Command failed|Turn (completed|failed)|Reviewer (started|finished))/;
@@ -143,7 +147,7 @@ function fmtElapsed(ms) {
 
 // Prints the job's progress lines (WATCH_LINE) from the start of its log,
 // then a last line once it ends. Resolves to the exit code.
-async function watch(id, { pollMs = WATCH_POLL_MS, write = (l) => process.stdout.write(`${l}\n`) } = {}) {
+async function watch(id, { pollMs = WATCH_POLL_MS, chunkBytes = WATCH_CHUNK_BYTES, write = (l) => process.stdout.write(`${l}\n`) } = {}) {
   let found = findJob(id);
   if (!found) {
     write(`Codex job ${id} not found.`);
@@ -152,21 +156,24 @@ async function watch(id, { pollMs = WATCH_POLL_MS, write = (l) => process.stdout
   const file = logFileOf(found.dir, found.job);
   let offset = 0;
   let partial = '';
+  const decoder = new StringDecoder('utf8');
+  const buf = Buffer.alloc(chunkBytes);
   const drain = () => {
     if (!file) return;
     let fd;
     try {
       fd = fs.openSync(file, 'r');
-      const size = fs.fstatSync(fd).size;
-      if (size <= offset) return;
-      const buf = Buffer.alloc(size - offset);
-      fs.readSync(fd, buf, 0, buf.length, offset);
-      offset = size;
-      const lines = (partial + buf.toString('utf8')).split('\n');
-      partial = lines.pop();
-      for (const line of lines) {
-        const text = stripStamp(line);
-        if (/^\[[^\]]*\]/.test(line) && WATCH_LINE.test(text)) write(text.length > 200 ? `${text.slice(0, 199)}…` : text);
+      let n;
+      while ((n = fs.readSync(fd, buf, 0, buf.length, offset)) > 0) {
+        offset += n;
+        const lines = (partial + decoder.write(buf.subarray(0, n))).split('\n');
+        // Only a line's start can match, so a line with no end yet keeps its
+        // start, not all of it.
+        partial = lines.pop().slice(0, WATCH_PARTIAL_CHARS);
+        for (const line of lines) {
+          const text = stripStamp(line);
+          if (/^\[[^\]]*\]/.test(line) && WATCH_LINE.test(text)) write(text.length > 200 ? `${text.slice(0, 199)}…` : text);
+        }
       }
     } catch (e) {
       // The log may not exist yet for a queued job.
