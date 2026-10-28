@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const st = require('./jev-state');
+const { redact } = require('./jev-redact');
 
 // Compaction only matters on long sessions; their newest part is enough.
 const TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -93,14 +94,14 @@ function buildDigest(text, cwd) {
   const lines = ['Jev kept these details from before the compaction, in case the summary left them out:'];
   if (requests.length > 0) {
     lines.push('Latest requests from the user (oldest first):');
-    for (const r of requests.slice(-REQUESTS)) lines.push(`- ${clip(r.replace(/\s+/g, ' '), REQUEST_CHARS)}`);
+    for (const r of requests.slice(-REQUESTS)) lines.push(`- ${clip(redact(r).replace(/\s+/g, ' '), REQUEST_CHARS)}`);
   }
   const show = (f) => {
     const rel = cwd ? path.relative(cwd, f) : f;
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : f;
   };
   if (files.length > 0) lines.push(`Files edited or written (most recent last): ${files.slice(-FILES).map(show).join(', ')}`);
-  if (reply) lines.push(`Your last reply ended with: ${clip(reply.slice(-REPLY_CHARS * 2).replace(/\s+/g, ' '), REPLY_CHARS)}`);
+  if (reply) lines.push(`Your last reply ended with: ${clip(redact(reply).slice(-REPLY_CHARS * 2).replace(/\s+/g, ' '), REPLY_CHARS)}`);
   return lines.join('\n');
 }
 
@@ -139,6 +140,7 @@ function restore(hookInput) {
   try {
     saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
+    fs.rmSync(file, { force: true });
     return null;
   }
   fs.rmSync(file, { force: true });

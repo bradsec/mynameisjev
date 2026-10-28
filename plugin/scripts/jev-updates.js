@@ -74,7 +74,10 @@ function newer(a, b) {
 // A git remote and ref safe to hand to `git ls-remote`: an https or ssh
 // remote and a plain ref name, neither able to pass as a git option.
 function safeRemote(url, ref) {
-  return /^(https:\/\/|ssh:\/\/|git@)[A-Za-z0-9._~:\/@-]+$/.test(url) && /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(ref);
+  if (!/^(https:\/\/|ssh:\/\/|git@)[A-Za-z0-9._~:\/@-]+$/.test(url) || !/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(ref)) return false;
+  // https userinfo is a credential (user:pass@ or token@); ssh://git@ is a
+  // plain login, but ssh with a password is not.
+  return !/^https:\/\/[^/]*@/.test(url) && !/^ssh:\/\/[^/@]*:[^/@]*@/.test(url);
 }
 
 const short = (sha) => String(sha).slice(0, 12);
@@ -106,8 +109,10 @@ async function latestPluginVersion(marketplace, name, install) {
     // Both come from a third-party marketplace file and reach git as
     // arguments: a value starting with "-" would be read as an option
     // (--upload-pack runs a command), so only accept plain remotes and refs.
-    if (!safeRemote(url, ref)) throw new Error(`skipped: unexpected source ${JSON.stringify(url)} ${JSON.stringify(ref)}`);
-    const head = (await run('git', ['ls-remote', url, ref])).split(/\s/)[0];
+    if (!safeRemote(url, ref)) throw new Error('skipped: unexpected source remote or ref');
+    let head;
+    try { head = (await run('git', ['ls-remote', url, ref])).split(/\s/)[0]; }
+    catch (e) { throw new Error('git ls-remote failed'); }
     return head ? { latest: short(head), compare: 'sha' } : null;
   }
   return null;

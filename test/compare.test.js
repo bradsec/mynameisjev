@@ -13,6 +13,7 @@ const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} line ${i +
 fs.writeFileSync(path.join(root, 'src', 'a.js'), lines(10, 'a'));
 fs.writeFileSync(path.join(root, 'src', 'b.js'), lines(10, 'b'));
 fs.writeFileSync(path.join(root, 'big.js'), 'x'.repeat(cmp.MAX_VARIANT_CHARS + 1));
+fs.writeFileSync(path.join(root, '..config'), 'local config');
 fs.writeFileSync(path.join(tmp, 'outside.js'), 'secret stuff');
 // Windows without Developer Mode cannot create symlinks; that case is skipped there.
 let canLink = true;
@@ -35,6 +36,11 @@ test('readVariants reads files and line ranges inside the project', () => {
   assert.match(v[0].text, /a line 10/);
   assert.strictEqual(v[1].label, 'b.js:2-3');
   assert.strictEqual(v[1].text, 'b line 2\nb line 3');
+});
+
+test('readVariants accepts a project file whose name begins with two dots', () => {
+  const v = cmp.readVariants(cmp.parseRaw('..config src/a.js').files, { root, cwd: root });
+  assert.strictEqual(v[0].text, 'local config');
 });
 
 test('readVariants labels same-named files by their path', () => {

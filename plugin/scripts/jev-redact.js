@@ -15,6 +15,7 @@ const PATTERNS = [
   // GitHub tokens.
   /\bgh[pousr]_[A-Za-z0-9]{30,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bnpm_[A-Za-z0-9]{36}\b/g,
   // AWS access key ids.
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
   // Slack tokens.
@@ -27,10 +28,11 @@ const PATTERNS = [
   /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
 ];
 
-// `Authorization: Bearer <token>`: keep the scheme, drop the token.
+// Authorization headers: keep the scheme, drop the credential.
 const BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*/g;
-// user:password@ in URLs.
-const URL_CREDENTIALS = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi;
+const BASIC = /\b(Authorization:\s*Basic\s+)[A-Za-z0-9+/]{4,}={0,2}/gi;
+// userinfo in URLs.
+const URL_CREDENTIALS = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+(?::[^\s/@]+)?@/gi;
 // API_KEY=..., "password": "...", client_secret: ... : keep the name, drop the value.
 const ASSIGNMENT = /\b([A-Za-z0-9_.-]*(?:secret|token|passwd|password|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)[A-Za-z0-9_.-]*["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;}]+)/gi;
 
@@ -39,6 +41,7 @@ function redact(text) {
   let out = text;
   for (const re of PATTERNS) out = out.replace(re, MARK);
   out = out.replace(BEARER, `$1${MARK}`);
+  out = out.replace(BASIC, `$1${MARK}`);
   out = out.replace(URL_CREDENTIALS, `$1${MARK}@`);
   // A value already replaced above stays as the marker.
   out = out.replace(ASSIGNMENT, (m, name, value) => (value === MARK ? m : `${name}${MARK}`));

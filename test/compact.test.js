@@ -48,6 +48,25 @@ test('digest: nothing worth keeping gives null', () => {
   assert.strictEqual(compact.buildDigest(assistant([{ type: 'text', text: 'hi' }])), null);
 });
 
+test('saved digest redacts secrets in requests and replies', () => {
+  fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true }));
+  const file = path.join(tmp, 'secret.jsonl');
+  fs.writeFileSync(file, [user('Use Authorization: Basic dXNlcjpwYXNz'), assistant([{ type: 'text', text: 'Token npm_' + 'a'.repeat(36) }])].join('\n'));
+  compact.save({ session_id: 'secret', transcript_path: file });
+  const saved = fs.readFileSync(compact.digestPath('secret'), 'utf8');
+  assert.doesNotMatch(saved, /dXNlcjpwYXNz|npm_aaa/);
+  assert.match(saved, /Authorization: Basic \[REDACTED\]/);
+  assert.match(saved, /Token \[REDACTED\]/);
+});
+
+test('restore removes invalid digest files', () => {
+  fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true }));
+  const file = compact.digestPath('invalid');
+  fs.writeFileSync(file, '{bad');
+  assert.strictEqual(compact.restore({ session_id: 'invalid', source: 'compact' }), null);
+  assert.ok(!fs.existsSync(file));
+});
+
 test('save then restore hands the digest over once, only on compact', () => {
   fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true }));
   const file = path.join(tmp, 't.jsonl');

@@ -48,7 +48,7 @@ function readVariants(files, { root, cwd }) {
       throw new Error(`cannot read ${file} (${e.code || e.message})`);
     }
     const rel = path.relative(rootReal, real);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`${file} is outside the project (${rootReal}); only project files are sent to Jev`);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error(`${file} is outside the project (${rootReal}); only project files are sent to Jev`);
     let text;
     try {
       text = fs.readFileSync(real, 'utf8');

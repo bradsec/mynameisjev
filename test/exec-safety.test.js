@@ -23,6 +23,10 @@ test('Windows shell arguments: ids and paths pass, metacharacters are refused', 
 test('git remotes from marketplace files: plain remotes pass, option injection is refused', () => {
   assert.ok(updates.safeRemote('https://github.com/obra/superpowers.git', 'HEAD'));
   assert.ok(updates.safeRemote('git@github.com:org/repo.git', 'release/v2'));
+  assert.ok(!updates.safeRemote('https://user:pass@example.com/repo.git', 'HEAD'));
+  assert.ok(!updates.safeRemote('https://token@example.com/repo.git', 'HEAD'));
+  assert.ok(updates.safeRemote('ssh://git@example.com/repo.git', 'HEAD'));
+  assert.ok(!updates.safeRemote('ssh://user:pass@example.com/repo.git', 'HEAD'));
   assert.ok(!updates.safeRemote('--upload-pack=touch /tmp/pwned', 'HEAD'));
   assert.ok(!updates.safeRemote('https://github.com/a/b.git', '--upload-pack=x'));
   assert.ok(!updates.safeRemote('https://example.com/a b', 'HEAD'));

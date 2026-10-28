@@ -13,6 +13,7 @@ test('redacts common key formats', () => {
     fake('sk-', 32),
     fake('ghp_', 36),
     fake('github_pat_', 40),
+    fake('npm_', 36),
     fake('AKIA', 16, 'A'),
     fake('xoxb-', 30, '1'),
     fake('AIza', 35),
@@ -41,7 +42,10 @@ test('keeps names but drops values of secret-looking assignments', () => {
 
 test('redacts bearer tokens and URL credentials', () => {
   assert.strictEqual(redact(`Authorization: Bearer ${fake('', 30, 'b')}`), `Authorization: Bearer ${MARK}`);
+  assert.strictEqual(redact('Authorization: Basic dXNlcjpwYXNz'), `Authorization: Basic ${MARK}`);
+  assert.strictEqual(redact('authorization: basic dTpw'), `authorization: basic ${MARK}`);
   assert.strictEqual(redact('clone https://me:s3cret@example.com/repo.git'), `clone https://${MARK}@example.com/repo.git`);
+  assert.strictEqual(redact('clone https://mytoken@example.com/repo.git'), `clone https://${MARK}@example.com/repo.git`);
 });
 
 test('leaves ordinary text alone', () => {
@@ -51,6 +55,7 @@ test('leaves ordinary text alone', () => {
     'Rename getApiKey to readApiKey across the repo.',
     'Visit https://example.com/docs for details.',
     'Write a short email to my landlord about the faucet.',
+    'Email me@example.com and clone git@github.com:org/repo.git.',
   ];
   for (const p of plain) assert.strictEqual(redact(p), p);
 });

@@ -24,18 +24,29 @@ function dataFile(name) {
 // Hooks and the status line read these files while others write them, so a
 // write goes to a temp file and is renamed into place: readers see the old
 // file or the new one, never half of one. Windows refuses the rename while
-// another process has the file open; then it falls back to a direct write.
+// another process has the file open, usually for a moment: retry briefly,
+// then fall back to a direct write rather than drop the change.
 function writeFileAtomic(file, text) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, text);
-  try {
-    fs.renameSync(tmp, file);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
-    if (e.code !== 'EPERM' && e.code !== 'EACCES' && e.code !== 'EBUSY') throw e;
-    fs.writeFileSync(file, text);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      if (e.code !== 'EPERM' && e.code !== 'EACCES' && e.code !== 'EBUSY') {
+        try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
+        throw e;
+      }
+      if (attempt < 3) { sleepMs(20); continue; }
+      try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
+      fs.writeFileSync(file, text);
+      return;
+    }
   }
 }
+
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // Everything beyond sizing and routing is opt-in: several features change
 // files outside Jev (Codex's AGENTS.md, plugin installs, Codex threads).
@@ -190,8 +201,7 @@ function readStateFile() {
 }
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-// Maps (stats, costs, routes, ...) hold only numbers and objects; records
-// (a route, lastCall, a streak) also hold strings and are replaced whole.
+// Maps (stats, costs, routes, ...) hold only numbers and objects.
 const isMap = (v) => isPlainObject(v) && Object.values(v).every((x) => typeof x === 'number' || isPlainObject(x));
 
 // Three-way merge of this process's changes (ours vs base, the state it read)
@@ -201,7 +211,7 @@ const isMap = (v) => isPlainObject(v) && Object.values(v).every((x) => typeof x 
 function merge(base, ours, disk, top = false) {
   if (JSON.stringify(ours) === JSON.stringify(base)) return disk;
   if (typeof ours === 'number' && typeof base === 'number' && typeof disk === 'number') return disk + (ours - base);
-  if ((top || (isMap(ours) && isMap(disk))) && isPlainObject(ours) && isPlainObject(base) && isPlainObject(disk)) {
+  if ((top || (isMap(ours) && isMap(disk)) || (isPlainObject(base) && isPlainObject(disk))) && isPlainObject(ours) && isPlainObject(base) && isPlainObject(disk)) {
     const out = {};
     for (const k of new Set([...Object.keys(disk), ...Object.keys(ours)])) {
       // A key this process deleted stays deleted.
@@ -229,13 +239,35 @@ function assignInPlace(target, src) {
 // only what changed since. A state built by hand is written as given.
 function writeState(state) {
   const file = dataFile('state.json');
-  let out = state;
-  if (state[BASE] && fs.existsSync(file)) {
-    out = merge(state[BASE], clone(state), readStateFile(), true);
-    assignInPlace(state, out);
+  const lock = dataFile('state.lock');
+  const deadline = Date.now() + 500;
+  let locked = false;
+  while (!locked && Date.now() < deadline) {
+    try {
+      const fd = fs.openSync(lock, 'wx');
+      fs.closeSync(fd);
+      locked = true;
+    } catch (e) {
+      if (e.code !== 'EEXIST') break;
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 5000) fs.unlinkSync(lock);
+      } catch (e2) { /* another writer removed it */ }
+      if (!locked) sleepMs(10);
+    }
   }
-  writeFileAtomic(file, JSON.stringify(out, null, 2));
-  if (state[BASE]) state[BASE] = clone(out);
+  try {
+    let out = state;
+    if (state[BASE] && fs.existsSync(file)) {
+      out = merge(state[BASE], clone(state), readStateFile(), true);
+      assignInPlace(state, out);
+    }
+    writeFileAtomic(file, JSON.stringify(out, null, 2));
+    if (state[BASE]) state[BASE] = clone(out);
+  } finally {
+    if (locked) {
+      try { fs.unlinkSync(lock); } catch (e) { /* another writer removed it */ }
+    }
+  }
 }
 
 // Route bookkeeping. Sessions run side by side, so each keeps its own route;

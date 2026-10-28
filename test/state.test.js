@@ -53,7 +53,7 @@ test('writing the same state twice does not count its changes twice', () => {
   assert.strictEqual(a.stats.helper, 2, 'the writer sees the merged values');
 });
 
-test('records such as routes are replaced whole, never spliced', () => {
+test('new records such as routes are replaced whole', () => {
   st.writeState({ ...st.readState(), route: null, routes: {} });
   const a = st.readState();
   const b = st.readState();
@@ -67,6 +67,63 @@ test('records such as routes are replaced whole, never spliced', () => {
   assert.deepStrictEqual(onDisk().routes.s1, theirs);
   assert.deepStrictEqual(onDisk().route, theirs);
   assert.deepStrictEqual(onDisk().lastCall, { at: 'b', ok: true });
+});
+
+test('concurrent changes to different fields of an existing session survive', () => {
+  st.writeState({ ...st.readState(), sessions: { same: { at: 'start', prefer: 'claude', review: true } } });
+  const a = st.readState();
+  const b = st.readState();
+  a.sessions.same.prefer = 'codex';
+  st.writeState(a);
+  b.sessions.same.review = false;
+  st.writeState(b);
+  assert.deepStrictEqual(onDisk().sessions.same, { at: 'start', prefer: 'codex', review: false });
+});
+
+test('state write removes a stale lock and releases its own lock', () => {
+  const lock = path.join(st.dataDir, 'state.lock');
+  fs.writeFileSync(lock, 'stale');
+  const old = new Date(Date.now() - 6000);
+  fs.utimesSync(lock, old, old);
+  st.writeState({ enabled: true });
+  assert.deepStrictEqual(onDisk(), { enabled: true });
+  assert.ok(!fs.existsSync(lock));
+});
+
+test('state write falls back within the lock deadline', () => {
+  const lock = path.join(st.dataDir, 'state.lock');
+  fs.writeFileSync(lock, 'other writer');
+  try {
+    const start = Date.now();
+    st.writeState({ enabled: false });
+    assert.ok(Date.now() - start < 1000);
+    assert.deepStrictEqual(onDisk(), { enabled: false });
+    assert.ok(fs.existsSync(lock));
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
+});
+
+test('a busy rename is retried before the direct-write fallback', (t) => {
+  const file = path.join(st.dataDir, 'atomic.json');
+  fs.writeFileSync(file, '{"old":true}');
+  const real = fs.renameSync;
+  let calls = 0;
+  t.mock.method(fs, 'renameSync', (a, b) => {
+    if (++calls < 3) { const e = new Error('busy'); e.code = 'EPERM'; throw e; }
+    return real(a, b);
+  });
+  st.writeFileAtomic(file, '{"new":true}');
+  assert.strictEqual(calls, 3);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"new":true}');
+});
+
+test('a rename that stays busy still saves the change', (t) => {
+  const file = path.join(st.dataDir, 'atomic.json');
+  t.mock.method(fs, 'renameSync', () => { const e = new Error('busy'); e.code = 'EPERM'; throw e; });
+  st.writeFileAtomic(file, '{"kept":true}');
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"kept":true}');
+  assert.deepStrictEqual(fs.readdirSync(st.dataDir).filter((f) => f.endsWith('.tmp')), []);
 });
 
 test('a hand-built state is written as given', () => {

@@ -76,3 +76,31 @@ test('update checks report inactive counterparts and update only older active co
     apply: ['codex', ['plugin', 'add', 'older@remote']],
   }]);
 });
+
+test('update cache omits remote credentials and failed git arguments', async (t) => {
+  const pluginsDir = path.join(tmp, 'plugins');
+  const marketDir = path.join(pluginsDir, 'marketplaces', 'remote', '.claude-plugin');
+  fs.mkdirSync(marketDir, { recursive: true });
+  fs.writeFileSync(path.join(pluginsDir, 'installed_plugins.json'), JSON.stringify({ plugins: {
+    'bad@remote': [{ version: '1', gitCommitSha: 'abc' }],
+    'fail@remote': [{ version: '1', gitCommitSha: 'abc' }],
+  } }));
+  fs.writeFileSync(path.join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({ remote: { autoUpdate: false } }));
+  fs.writeFileSync(path.join(marketDir, 'marketplace.json'), JSON.stringify({ plugins: [
+    { name: 'bad', source: { url: 'https://user:pass@example.com/repo.git' } },
+    { name: 'fail', source: { url: 'https://example.com/secret-path.git' } },
+  ] }));
+  t.mock.method(codex, 'codexAvailable', () => false);
+  t.mock.method(plugins, 'pluginPairs', async () => []);
+  t.mock.method(exec, 'run', async (cmd, args) => {
+    if (cmd === 'rtk') throw new Error('not installed');
+    if (cmd === 'claude') return '';
+    if (cmd === 'git') throw new Error(`git ${args.join(' ')} failed`);
+    assert.fail(`Unexpected command: ${cmd}`);
+  });
+  const found = await updates.runCheck();
+  const stored = JSON.stringify(updates.readCache());
+  assert.strictEqual(found.errors.length, 2);
+  assert.doesNotMatch(stored, /user:pass|secret-path/);
+  assert.match(stored, /git ls-remote failed/);
+});
