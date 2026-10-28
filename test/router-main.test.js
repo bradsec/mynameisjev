@@ -137,6 +137,14 @@ test('the Jev request asks the effort question with four levels', () => {
   assert.strictEqual(q.criteria.length, 4);
 });
 
+test('eligible prompts send six questions, seven with prior context; skipped prompts send none', () => {
+  const first = run('Write a short email to my landlord about the faucet.');
+  assert.strictEqual(Object.keys(first.bodies[0].questions).length, 6);
+  const next = run('Now revise that email to mention the leaking pipe.', { keepState: true });
+  assert.strictEqual(Object.keys(next.bodies[0].questions).length, 7);
+  assert.strictEqual(run('/mynameisjev:status').bodies.length, 0);
+});
+
 test('sizing calls record their cost under sizing', () => {
   const r = run('Write a short email to my landlord about the faucet.');
   assert.deepStrictEqual(r.state.costs.sizing, { calls: 1, cost: 0.00002 });

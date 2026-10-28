@@ -32,6 +32,7 @@ test('skips slash commands, short messages and bare confirmations', () => {
 test('delegation: suppressed when the task needs the conversation', () => {
   const a = router.delegationAdvice('large', result({ size: 'large', contained: 0.2 }), 'opus');
   assert.match(a.suppress, /not self-contained/);
+  assert.match(router.delegationAdvice('large', result({ size: 'large', contained: null }), 'opus').suppress, /not self-contained/);
 });
 
 test('delegation: tiny tasks with little output stay inline', () => {
@@ -97,6 +98,13 @@ test('route: with Claude fine, work that needs the conversation stays quiet', ()
   assert.match(r.suppress, /not self-contained/);
 });
 
+test('route: unknown containment never routes the whole task', () => {
+  const r = router.routeAdvice('everyday', result({ contained: null, coding: 0.9 }), ctx({ codexNow: codexOk }));
+  assert.notStrictEqual(r.codex, true);
+  const steps = router.routeAdvice('everyday', result({ contained: null, coding: 0.9 }), ctx({ codexNow: codexOk, preferCodex: true }));
+  assert.strictEqual(steps.model, 'steps');
+});
+
 test('limit notice: none below 80%', () => {
   assert.strictEqual(router.limitNoticeFor({ pct: 60, window: '5h', resetsAt: 0 }, codexOk, false), null);
 });
@@ -152,6 +160,8 @@ test('prefer codex: work that needs the conversation gets the sub-step note', ()
 
 test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () => {
   assert.match(router.routeAdvice('tiny', result({ size: 'tiny' }), ctx({ codexNow: codexOk, preferCodex: true })).suppress, /hand-off costs more/);
+  assert.match(router.routeAdvice('tiny', result({ size: 'tiny', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true })).suppress, /hand-off costs more/);
+  assert.strictEqual(router.routeAdvice('tiny', result({ size: 'tiny', contained: 0.1, heavy: 0.9 }), ctx({ codexNow: codexOk, preferCodex: true })).model, 'steps');
   assert.strictEqual(router.routeAdvice('everyday', result(), ctx({ codexNow: codexBusy, preferCodex: true })).codex, false);
 });
 
@@ -214,18 +224,16 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
 test('codex notes: full guidance once per session, then a short pointer', () => {
   const note = (over) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true, ...over })).note;
   const short = note({ guided: true });
-  assert.match(short, /As in Jev's first Codex note this session/);
+  assert.match(short, /Same Codex rules as earlier this session/);
   assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
-  assert.match(short, /review its result, weigh its notes, fix small issues and run the final check yourself/);
-  assert.match(short, /Notes for the lead/);
-  assert.match(short, /token-efficiently/, 'later notes keep the token rule');
-  assert.match(short, /skills that fit/);
-  assert.match(short, /--resume-last/, 'the command block keeps the follow-up flag');
-  assert.doesNotMatch(short, /git diff --stat|installed skills/);
-  assert.ok(short.length < note({ guided: false }).length - 400);
+  assert.match(short, /--model .*--effort/);
+  assert.match(short, /--write/);
+  assert.doesNotMatch(short, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|Notes for the lead|explicitly asks you/);
+  assert.ok(short.length < 700);
   const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
-  assert.match(steps, /As in Jev's first Codex note/);
-  assert.doesNotMatch(steps, /git diff --stat/);
+  assert.match(steps, /Same Codex rules as earlier this session/);
+  assert.doesNotMatch(steps, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|exception is small fixes/);
+  assert.ok(steps.length < 700);
 });
 
 test('Codex notes mention recent limits only', () => {

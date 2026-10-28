@@ -161,8 +161,14 @@ test('with Codex: hands off steps at 80%, auto-transfers at 90%', async () => {
   const route = await watcher.watch(hookInput);
   assert.match(route.systemMessage, /hands self-contained steps to Codex/);
   assert.match(route.hookSpecificOutput.additionalContext, /codex-companion\.mjs" task/);
+  assert.match(route.hookSpecificOutput.additionalContext, /Tasks without --write are read-only/);
   const stepsRoute = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
   assert.deepStrictEqual([stepsRoute.target, stepsRoute.model, stepsRoute.how, stepsRoute.session], ['codex', 'steps', 'suggested', 's'], 'mid-turn crossing arms the edit guard');
+
+  setUsage(86);
+  const repeat = await watcher.watch(hookInput);
+  assert.match(repeat.hookSpecificOutput.additionalContext, /Same Codex rules as earlier this session/);
+  assert.doesNotMatch(repeat.hookSpecificOutput.additionalContext, /Tasks without --write|For a follow-up|git diff --stat/);
 
   setUsage(91);
   const auto = await watcher.watch(hookInput);

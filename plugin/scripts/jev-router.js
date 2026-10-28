@@ -177,7 +177,7 @@ function sessionModelFamily(sessionId, transcriptPath) {
 function delegationAdvice(tier, result, sessionFamily) {
   const info = TIER_INFO[tier];
   const head = `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}).`;
-  const contained = result.contained === null || result.contained >= NOUL_THRESHOLD;
+  const contained = result.contained !== null && result.contained >= NOUL_THRESHOLD;
   const heavy = result.heavy !== null && result.heavy >= NOUL_THRESHOLD;
 
   if (!contained) return { suppress: `${tier}: needs the conversation's context, not self-contained` };
@@ -373,7 +373,7 @@ function setRoute(state, target, model, how, session, effort) {
 // or the task is coding (Codex bills a separate ChatGPT-plan quota). Returns
 // { note, codex } or { suppress: reason }.
 function routeAdvice(tier, result, ctx) {
-  const contained = result.contained === null || result.contained >= NOUL_THRESHOLD;
+  const contained = result.contained !== null && result.contained >= NOUL_THRESHOLD;
   const heavy = result.heavy !== null && result.heavy >= NOUL_THRESHOLD;
   const coding = result.coding !== null && result.coding >= NOUL_THRESHOLD;
 
@@ -389,6 +389,7 @@ function routeAdvice(tier, result, ctx) {
   // Work that needs this conversation can't move to Codex whole, but its
   // self-contained steps can: with Codex first, that is the note to give.
   if (!contained && codexFirst && ctx.codexNow.ok && companion) {
+    if (tier === 'tiny' && !heavy) return { suppress: 'tiny: hand-off costs more than it saves' };
     return { note: subStepAdvice(ctx.claudeLow ? ctx.claude : null, companion, opts), codex: true, model: 'steps' };
   }
   if (contained && ctx.codexNow.ok && companion && (codexFirst || coding)) {
@@ -417,13 +418,15 @@ function subStepAdvice(claude, companion, { review, guided, codexLimits } = {}) 
   const why = claude
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
+  if (guided) return `${why}Delegate steps to Codex:\n${taskCommand(companion, '')}\n` +
+    `Flags: --model, --effort, --write as needed. ${limitLine(codexLimits)}Same Codex rules as earlier this session.`;
   return why +
     'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
     `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}` +
-    `${guided ? shortGuide(review) : brief()} ` +
+    `${brief()} ` +
     (review
       ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ' +
-        `The exception is small fixes while reviewing what Codex returned.${guided ? '' : ` ${REVIEW}`} `
+        `The exception is small fixes while reviewing what Codex returned. ${REVIEW} `
       : 'Do not make edits yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ') +
     `${DIRECT_ASK} Keep your own replies short.`;
 }
@@ -534,7 +537,8 @@ function transferNotice(claude, codexNow, t) {
 // subagent, which would spend the Claude usage this route is meant to save.
 function codexAdvice(tier, result, reason, choice, companion, opts) {
   return `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}). ` +
-    `Route it to Codex (${reason}) ${codexCall(choice, companion, opts)}\n${DIRECT_ASK}`;
+    `Route it to Codex (${reason}) ${codexCall(choice, companion, opts)}` +
+    (opts.guided ? '' : `\n${DIRECT_ASK}`);
 }
 
 // Claude stays in charge of Codex hand-offs as the senior developer: it
@@ -564,10 +568,6 @@ const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do th
 // After the first Codex note of a session (or since its last compaction) the
 // full brief and review text is already in Claude's context, so later notes
 // only point back to it (st.guidedFor).
-const shortGuide = (review) => 'As in Jev\'s first Codex note this session: you are the senior developer with the final say; ' +
-  'write Codex a brief (Goal, Context, Constraints, Done when, Verify with) that asks it to work token-efficiently ' +
-  'with the skills that fit and to end with its Notes for the lead; work token-efficiently yourself too' +
-  `${review ? ', then review its result, weigh its notes, fix small issues and run the final check yourself' : ''}.`;
 
 const taskCommand = (companion, flags) => codex.taskCommand(companion, flags, '<the brief>');
 const STDIN_RULE = 'Keep the brief in the quoted heredoc as shown, never as a quoted argument, and put extra flags before <<.';
@@ -580,21 +580,23 @@ const RESUME_RULE = 'For a follow-up to the last Codex task (a fix, a send-back,
   'It picks the latest completed task in this session; if another task is in flight or finished later, start fresh with a self-contained brief.';
 
 // opts.review: Claude checks each Codex result and fixes small issues
-// itself. opts.guided: this session already has the full text (shortGuide).
+// itself. opts.guided: this session already has the full text.
 function codexCall(choice, companion, { review, guided, codexLimits } = {}) {
   const flags = [
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
   ].filter(Boolean).join(' ');
+  if (guided) return `with one Bash call:\n${taskCommand(companion, flags)}\n` +
+    `Flags: --model, --effort, --write as needed. ${limitLine(codexLimits)}Same Codex rules as earlier this session.`;
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash on Windows too.
     `${taskCommand(companion, flags)}\n` +
-    `${guided ? shortGuide(review) : brief()}\n` +
+    `${brief()}\n` +
     `${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}For long multi-step work add --background; it prints a job ID. ` +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
     'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.' +
-    (review && !guided ? `\n${REVIEW}` : '');
+    (review ? `\n${REVIEW}` : '');
 }
 
 // A routing override at the start of a message: "+large fix the parser".

@@ -213,6 +213,13 @@ mynameisjev detects Codex automatically (the plugin enabled and `codex` on
 your `PATH`) and turns on Codex routing, the Codex status line and
 `/mynameisjev:codex`.
 
+Codex hides routine progress stderr unless a task fails. Tasks without
+`--write` are read-only; resuming one keeps that sandbox, so start a new
+`--write` task for edits or checks that write. Jev remembers Codex sandbox
+and network denials for seven days and adds a short hint to later notes.
+`/mynameisjev:sync on` puts a rule in the generated `AGENTS.md`: report
+blocked commands without retrying sandbox, permission or network denials.
+
 For long work the router tells Claude to start the task with `--background`
 and follow it with Claude Code's Monitor tool:
 
@@ -310,8 +317,9 @@ score is a second opinion, not a test result.
 
 ## How routing works
 
-Each message gets one Jev call with up to five questions. The router then
-adds a note to Claude's context, or stays silent:
+Eligible prompts get one Jev call with six questions, or seven when a prior
+message in the session is available. Skipped prompts and overrides get no
+Jev call. The router then adds a note to Claude's context, or stays silent:
 
 | Situation | Note |
 | --- | --- |
@@ -525,8 +533,7 @@ status line shows `off in project` or `project config error`, and
 - Claude helper and Codex notes given, next to the hand-offs that ran (runs
   include hand-offs Claude started without a note)
 - `+` overrides used, and notes suppressed because a hand-off would not pay off
-- Codex results Claude reviewed, how many it fixed itself and how many it
-  sent back to Codex
+- `Codex results returned`, how many Claude fixed itself and sent back to Codex
 - tokens used by `mynameisjev:*` subagents per model (input, cache write,
   cache read, output), read from their transcripts when they finish
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.21
+
+- Close redaction gaps for Basic auth, npm tokens, credentialed URLs and
+  compaction digests. Reject credentialed Git remotes while allowing
+  `ssh://git@` URLs; keep raw Git arguments out of stored errors.
+- Lock state writes, merge per-session fields, and retry Windows rename
+  failures. Fix `/compare` handling of `..name` paths.
+- Hide routine Codex progress stderr unless a task fails. Use random heredoc
+  delimiters, explain read-only and resumed-thread sandbox limits, remember
+  Codex denials for seven days, and add a blocked-command rule to synced
+  `AGENTS.md`. Report `Codex results returned`.
+- Treat unknown containment as not self-contained, suppress tiny non-heavy
+  step hand-offs, and shorten repeat Codex notes after the first guidance.
+
 ## 0.3.20
 
 - Codex briefs use quoted heredocs, preserving shell-sensitive text, and
