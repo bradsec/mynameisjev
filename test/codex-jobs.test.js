@@ -74,6 +74,19 @@ test('a log path outside the workspace dir is not read', () => {
   assert.strictEqual(jobs.sessionJob('s1').last, null);
 });
 
+test('a log symlink outside the workspace dir is not read', { skip: process.platform === 'win32' }, () => {
+  const outside = path.join(tmp, 'outside.log');
+  const link = logPath('linked');
+  fs.writeFileSync(outside, `[${ago(0)}] outside-secret-marker\n`);
+  fs.symlinkSync(outside, link);
+  try {
+    writeJobs([{ id: 'linked', sessionId: 's1', status: 'running', pid: process.pid, startedAt: ago(1000), logFile: link }]);
+    assert.strictEqual(jobs.sessionJob('s1').last, null);
+  } finally {
+    fs.rmSync(link);
+  }
+});
+
 test('watch prints progress lines only, then the outcome, and exits', async () => {
   fs.writeFileSync(logPath('w1'), [
     `[${ago(9000)}] Starting Codex Task.`,

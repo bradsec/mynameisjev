@@ -66,8 +66,12 @@ function alive(pid) {
 // state.json is another plugin's file, so it does not pick what gets read.
 function logFileOf(dir, job) {
   if (typeof job.logFile !== 'string') return null;
-  const file = path.resolve(job.logFile);
-  return file.startsWith(path.resolve(dir) + path.sep) ? file : null;
+  try {
+    const file = fs.realpathSync(job.logFile);
+    return file.startsWith(fs.realpathSync(dir) + path.sep) ? file : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 // "[2026-10-25T02:11:45.226Z] Running command: ..." -> "Running command: ...".
