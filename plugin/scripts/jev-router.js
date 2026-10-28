@@ -382,7 +382,7 @@ function routeAdvice(tier, result, ctx) {
   if (askedClaude(result)) return { suppress: 'the user asked Claude to do it' };
 
   const companion = codex.companionPath();
-  const opts = { review: ctx.review, guided: ctx.guided };
+  const opts = { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits };
   // Codex first: Claude's usage is past the routing threshold, or the user
   // turned prefer-Codex mode on.
   const codexFirst = ctx.claudeLow || ctx.preferCodex;
@@ -413,13 +413,13 @@ const askedClaude = (result) => result.self !== null && result.self !== undefine
 // Codex whole: keep coordinating here, send the self-contained steps there.
 // `claude` is the usage peak when that is the reason, or null in prefer-Codex
 // mode. opts as for codexCall.
-function subStepAdvice(claude, companion, { review, guided } = {}) {
+function subStepAdvice(claude, companion, { review, guided, codexLimits } = {}) {
   const why = claude
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
   return why +
     'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
-    `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} Add --write if it should edit files. ${RESUME_RULE} ` +
+    `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}` +
     `${guided ? shortGuide(review) : brief()} ` +
     (review
       ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ' +
@@ -551,13 +551,13 @@ const BRIEF = 'You are the senior developer with the final say, and Codex is a d
   'Notes for the lead: risks, anything in the brief it disagrees with, and suggestions. If the brief conflicts with the ' +
   'code, Codex should stop and report the conflict instead of guessing. Work token-efficiently yourself too: keep the brief ' +
   'and your replies short, read only what you need, and use your own installed skills that fit, especially ones that cut ' +
-  'tokens without lowering the quality of the work.';
+  'tokens without lowering the quality of the work. Tell Codex not to retry or work around sandbox, permission or network denials, but to report them as blocked.';
 const RTK_BRIEF = 'RTK is installed: tell Codex to prefix its shell commands with rtk (for example rtk git status) to cut command output.';
 // The brief text, with the RTK line only when the rtk CLI is on PATH: Codex
 // has no hook to add the prefix for it.
 const brief = () => (sync.rtkBinary() ? `${BRIEF} ${RTK_BRIEF}` : BRIEF);
 const REVIEW = 'When Codex returns, review its work cheaply: read git diff --stat and the diff of the changed files only, ' +
-  'not whole files, and run the smallest relevant check. Weigh its Notes for the lead: act on each or tell the user why not. ' +
+  'not whole files, and run the final relevant check yourself. Weigh its Notes for the lead: act on each or tell the user why not. ' +
   'Fix small issues yourself (about 10 lines or fewer); send anything larger back to Codex as a follow-up brief with --resume-last. ' +
   'Then tell the user the outcome in one or two lines.';
 const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do the work yourself, do it here instead.';
@@ -567,17 +567,21 @@ const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do th
 const shortGuide = (review) => 'As in Jev\'s first Codex note this session: you are the senior developer with the final say; ' +
   'write Codex a brief (Goal, Context, Constraints, Done when, Verify with) that asks it to work token-efficiently ' +
   'with the skills that fit and to end with its Notes for the lead; work token-efficiently yourself too' +
-  `${review ? ', then review its result, weigh its notes and fix small issues yourself' : ''}.`;
+  `${review ? ', then review its result, weigh its notes, fix small issues and run the final check yourself' : ''}.`;
 
 const taskCommand = (companion, flags) => codex.taskCommand(companion, flags, '<the brief>');
-const STDIN_RULE = `Keep the brief in the quoted heredoc as shown, never as a quoted argument, and put any extra flags before <<'${codex.HEREDOC}'.`;
+const STDIN_RULE = 'Keep the brief in the quoted heredoc as shown, never as a quoted argument, and put extra flags before <<.';
+const SANDBOX_RULE = 'Tasks without --write are read-only; add --write for checks that write (tests using temp dirs, builds). A read-only thread stays read-only on --resume-last; start a fresh --write task.';
+const limitLine = (limits) => (limits?.readonly ? 'Codex recently hit a read-only sandbox: pass --write for checks that write. ' : '') +
+  (limits?.network ? 'Codex recently hit a network denial: report blocked commands without retrying. ' : '');
 // The companion resumes the latest Codex task thread of this Claude session.
 const RESUME_RULE = 'For a follow-up to the last Codex task (a fix, a send-back, an answer to its notes) add --resume-last, ' +
-  'so Codex continues in the same thread with its context; without it each task starts a new thread.';
+  'so Codex continues in the same thread with its context; without it each task starts a new thread. ' +
+  'It picks the latest completed task in this session; if another task is in flight or finished later, start fresh with a self-contained brief.';
 
 // opts.review: Claude checks each Codex result and fixes small issues
 // itself. opts.guided: this session already has the full text (shortGuide).
-function codexCall(choice, companion, { review, guided } = {}) {
+function codexCall(choice, companion, { review, guided, codexLimits } = {}) {
   const flags = [
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
@@ -586,7 +590,7 @@ function codexCall(choice, companion, { review, guided } = {}) {
     // Forward slashes work in Git Bash on Windows too.
     `${taskCommand(companion, flags)}\n` +
     `${guided ? shortGuide(review) : brief()}\n` +
-    `${STDIN_RULE} Add --write if Codex should edit files. ${RESUME_RULE} For long multi-step work add --background; it prints a job ID. ` +
+    `${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}For long multi-step work add --background; it prints a job ID. ` +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
     'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.' +
@@ -634,7 +638,7 @@ function overrideAdvice(o, ctx) {
   }
   const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache, true);
   return {
-    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided })}`,
+    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits })}`,
     route: ['codex', choice.model || 'default', 'suggested'],
     // Asked for explicitly, so it goes even when usage looks high; the user
     // hears why it may fail.
@@ -883,7 +887,7 @@ function main() {
       // projects that turn sizing off.
       const override = parseOverride(prompt);
       if (override) {
-        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided });
+        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits });
         state.stats.forced += 1;
         if (o.route[0] === 'codex') st.markGuided(state, sessionId, review);
         setRoute(state, ...o.route, sessionId, o.effort);
@@ -953,7 +957,7 @@ function main() {
           setRoute(state, 'codex', 'steps', 'suggested', sessionId);
           st.markGuided(state, sessionId, review);
           writeState(state);
-          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion, { review, guided }) };
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion, { review, guided, codexLimits: state.codexLimits }) };
         }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
@@ -977,6 +981,7 @@ function main() {
           guided,
           codexNow,
           codexCache,
+          codexLimits: state.codexLimits,
           overrides: state.codexTiers,
         });
         if (advice.note) {

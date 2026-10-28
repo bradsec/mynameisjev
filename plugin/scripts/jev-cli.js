@@ -175,7 +175,7 @@ async function report() {
     `  "+" overrides:    ${s.forced}`,
     `  subagent models set by enforce: ${s.enforced}`,
     `  Claude edits sent to Codex by enforce: ${s.editsBlocked || 0}`,
-    `  Codex results reviewed: ${s.codexReturns || 0}, fixed by Claude ${s.reviewFixes || 0}, sent back ${s.reviewSendBacks || 0}`,
+    `  Codex results returned: ${s.codexReturns || 0}, fixed by Claude ${s.reviewFixes || 0}, sent back ${s.reviewSendBacks || 0}`,
     `  turns ended at the usage limit: ${s.limitHits}`,
     `  notes suppressed (no gain): ${s.suppressed}`,
     `Topic shifts flagged: ${s.shift}`,

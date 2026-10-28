@@ -39,6 +39,7 @@ test('generated AGENTS.md: title swapped, claude-only removed, imports inlined',
   assert.doesNotMatch(text, /claude only rule/);
   assert.match(text, /Prefix every shell command with `rtk`/, 'Claude RTK rules get the prefix rule for Codex');
   assert.match(text, /claude rtk body/);
+  assert.match(text, /sandbox, permission, or network denial/);
 });
 
 test('a Codex variant of an import wins, and AGENTS.local.md is appended', () => {

@@ -45,6 +45,23 @@ test('reads flags from the command line only, not the heredoc brief', () => {
   assert.deepStrictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command } }), { target: 'codex', model: 'default', reviewing: true });
 });
 
+test('records read-only and network limits from Codex output', async () => {
+  setState({});
+  setUsage(10);
+  const command = 'node "/p/codex-companion.mjs" task "x"';
+  await watcher.watch({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: 'EROFS: read-only file system; network unreachable' } });
+  const limits = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).codexLimits;
+  assert.ok(Date.now() - Date.parse(limits.readonly) < 10000);
+  assert.ok(Date.now() - Date.parse(limits.network) < 10000);
+  setState({});
+  await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" result job-1' }, tool_response: { stdout: 'The filesystem is still read-only, so I cannot edit.' } });
+  assert.ok(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).codexLimits.readonly);
+  // A report that only mentions an error code is not a denial.
+  setState({});
+  await watcher.watch({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: 'jev-state.js retries on EPERM and EACCES' } });
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).codexLimits || {}, {});
+});
+
 test('marks when Codex\'s result is back for review fixes', async () => {
   setState({});
   setUsage(10);

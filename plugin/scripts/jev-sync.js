@@ -83,7 +83,7 @@ function buildAgents({ style = null } = {}) {
     .join('\n')
     .trim();
 
-  const parts = [HEADER, body];
+  const parts = [HEADER, body, 'If a command fails on sandbox, permission, or network denial (EROFS, EACCES, EPERM, read-only file system, operation not permitted, network unreachable), do not retry or work around it; report it as blocked and continue.'];
   const local = readText(localPath);
   if (local && local.trim()) parts.push(`<!-- jev-include: AGENTS.local.md -->\n${local.trim()}\n<!-- jev-include-end -->`);
   if (style) parts.push(skills.codexBlock(style));

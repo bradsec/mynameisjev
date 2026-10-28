@@ -79,6 +79,17 @@ async function watch(hookInput) {
   const current = st.readState();
   if (!current.enabled) return null;
   const ran = handOff(hookInput);
+  if (ran?.target === 'codex' || /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput))) {
+    const output = JSON.stringify(hookInput.tool_response || '');
+    // Denial wording only: bare EPERM/EACCES also show up in code Codex reports on.
+    const readonly = /EROFS|read-only file ?system|(?:sandbox|workspace|filesystem) is (?:still )?read-only/i.test(output);
+    const network = /network unreachable|ENETUNREACH|EHOSTUNREACH/i.test(output);
+    if (readonly) current.codexLimits.readonly = new Date().toISOString();
+    if (network) current.codexLimits.network = new Date().toISOString();
+    if (readonly || network) {
+      try { st.writeState(current); } catch (e) { /* the next result may record it */ }
+    }
+  }
   const before = st.routeFor(current, hookInput.session_id);
   const reviewOn = st.reviewFor(current, hookInput.session_id);
   const reviewing = !!(reviewOn && before && before.target === 'codex' && before.reviewing);
@@ -143,7 +154,7 @@ async function watch(hookInput) {
   // guided; state is written again after the notes are built.
   const steps = () => {
     const review = st.reviewFor(state, hookInput.session_id);
-    const note = r.subStepAdvice(claude, companion, { review, guided: st.guidedFor(state, hookInput.session_id, review) });
+    const note = r.subStepAdvice(claude, companion, { review, guided: st.guidedFor(state, hookInput.session_id, review), codexLimits: state.codexLimits });
     st.markGuided(state, hookInput.session_id, review);
     return note;
   };

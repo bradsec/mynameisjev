@@ -159,7 +159,7 @@ test('codex notes: Claude writes the brief, has the final say, and reviews when 
   const on = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true }));
   assert.match(on.note, /senior developer with the final say/);
   assert.match(on.note, /Goal; Context .*Done when; Verify with/);
-  assert.match(on.note, /task --model \S+ --effort \S+ <<'JEV_BRIEF'\n<the brief>\nJEV_BRIEF\n/, 'brief goes on stdin, not as a quoted argument');
+  assert.match(on.note, /task --model \S+ --effort \S+ 2>"\$jev_err" <<'(JEV_BRIEF_[a-f0-9]+)'\n<the brief>\n\1\n/, 'brief goes on stdin, not as a quoted argument');
   assert.match(on.note, /token-efficiently/);
   assert.match(on.note, /installed skills .*fit/);
   assert.doesNotMatch(on.note, /ponytail|superpowers|caveman/i, 'no plugin or skill names');
@@ -170,6 +170,13 @@ test('codex notes: Claude writes the brief, has the final say, and reviews when 
   assert.match(on.note, /Work token-efficiently yourself too/, 'Claude is held to it as well');
   assert.match(on.note, /saves tokens without lowering the quality/);
   assert.match(on.note, /git diff --stat/);
+  assert.match(on.note, /without --write are read-only/);
+  assert.match(on.note, /tests using temp dirs, builds/);
+  assert.match(on.note, /read-only thread stays read-only on --resume-last/);
+  assert.match(on.note, /latest completed task in this session/);
+  assert.match(on.note, /another task is in flight or finished later, start fresh with a self-contained brief/);
+  assert.match(on.note, /run the final relevant check yourself/);
+  assert.match(on.note, /Tell Codex not to retry or work around sandbox, permission or network denials/);
   assert.match(on.note, /explicitly asks you \(Claude\) to do the work yourself, do it here/);
   const off = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: false }));
   assert.match(off.note, /final say/);
@@ -198,7 +205,7 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
   assert.match(steps(true), /exception is small fixes while reviewing/);
   assert.match(steps(true), /final say/);
   assert.match(steps(true), /do it here instead/);
-  assert.match(steps(true), /task <<'JEV_BRIEF'/);
+  assert.match(steps(true), /task 2>"\$jev_err" <<'JEV_BRIEF_[a-f0-9]+'/);
   assert.doesNotMatch(steps(true), /"<the brief>"/);
   assert.doesNotMatch(steps(false), /small fixes/);
   assert.match(steps(false), /Do not make edits yourself/);
@@ -209,7 +216,7 @@ test('codex notes: full guidance once per session, then a short pointer', () => 
   const short = note({ guided: true });
   assert.match(short, /As in Jev's first Codex note this session/);
   assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
-  assert.match(short, /review its result, weigh its notes and fix small issues yourself/);
+  assert.match(short, /review its result, weigh its notes, fix small issues and run the final check yourself/);
   assert.match(short, /Notes for the lead/);
   assert.match(short, /token-efficiently/, 'later notes keep the token rule');
   assert.match(short, /skills that fit/);
@@ -219,6 +226,13 @@ test('codex notes: full guidance once per session, then a short pointer', () => 
   const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
   assert.match(steps, /As in Jev's first Codex note/);
   assert.doesNotMatch(steps, /git diff --stat/);
+});
+
+test('Codex notes mention recent limits only', () => {
+  const note = (codexLimits) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, codexLimits })).note;
+  assert.match(note({ readonly: new Date().toISOString(), network: new Date().toISOString() }), /Codex recently hit a read-only sandbox/);
+  assert.match(note({ network: new Date().toISOString() }), /Codex recently hit a network denial/);
+  assert.doesNotMatch(note({}), /Codex recently hit/);
 });
 
 test('route: a message asking Claude itself to do it gets no hand-off', () => {

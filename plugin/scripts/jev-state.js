@@ -120,6 +120,7 @@ const DEFAULT_STATE = {
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
   codexTiers: {},
+  codexLimits: {},
   // Each tier's Codex model as last picked from Codex's model list, so a
   // change is announced once (jev-router.js modelChangeNotice).
   codexModelsSeen: null,
@@ -173,6 +174,7 @@ function normalize(parsed) {
     ...parsed,
     stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
     codexTiers: { ...(parsed.codexTiers || {}) },
+    codexLimits: Object.fromEntries(Object.entries(parsed.codexLimits || {}).filter(([, at]) => Date.now() - Date.parse(at) < 7 * 86400000)),
     helperTokens: { ...(parsed.helperTokens || {}) },
     costs: { ...(parsed.costs || {}) },
     routes: { ...(parsed.routes || {}) },

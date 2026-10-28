@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const readline = require('readline');
 
@@ -66,9 +67,10 @@ function readJson(file) {
 // brief break the command or get expanded by the shell. The companion reads
 // stdin before it starts a --background job. Forward slashes work in Git Bash
 // on Windows too.
-const HEREDOC = 'JEV_BRIEF';
 function taskCommand(companion, flags, placeholder) {
-  return `node "${companion.replace(/\\/g, '/')}" task ${flags ? `${flags} ` : ''}<<'${HEREDOC}'\n${placeholder}\n${HEREDOC}`;
+  let delimiter;
+  do { delimiter = `JEV_BRIEF_${crypto.randomBytes(3).toString('hex')}`; } while (placeholder.split('\n').includes(delimiter));
+  return `jev_err=$(mktemp) || exit $?\nnode "${companion.replace(/\\/g, '/')}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -ne 0 ]; then tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
 }
 
 // Newest installed codex plugin's companion script, or null when the plugin
@@ -281,7 +283,6 @@ function tierChoice(tier, overrides, cache, explicit = false) {
 }
 
 module.exports = {
-  HEREDOC,
   taskCommand,
   codexAvailable,
   DEFAULT_TIERS,

@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-codex-'));
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude');
@@ -10,6 +11,20 @@ process.env.CODEX_HOME = path.join(tmp, 'codex');
 
 const st = require('../plugin/scripts/jev-state');
 const codex = require('../plugin/scripts/jev-codex');
+
+test('task command hides progress, prints fatal stderr, and keeps its exit code', () => {
+  const script = path.join(tmp, 'companion.mjs');
+  fs.writeFileSync(script, 'process.stderr.write("progress\\n"); process.exit(Number(process.env.FAIL || 0));');
+  const command = codex.taskCommand(script, '', 'brief');
+  const delimiter = command.match(/<<'([^']+)'/)[1];
+  assert.match(delimiter, /^JEV_BRIEF_[a-f0-9]+$/);
+  assert.match(command, new RegExp(`\\n${delimiter}\\n`));
+  assert.notStrictEqual(delimiter, codex.taskCommand(script, '', 'brief').match(/<<'([^']+)'/)[1]);
+  const run = (fail) => spawnSync('bash', ['-c', command], { encoding: 'utf8', env: { ...process.env, FAIL: String(fail) } });
+  assert.deepStrictEqual([run(0).status, run(0).stderr], [0, '']);
+  const failed = run(7);
+  assert.deepStrictEqual([failed.status, failed.stderr], [7, 'progress\n']);
+});
 
 test('defaults: router only, every optional feature off', () => {
   const s = st.readState();
@@ -24,6 +39,13 @@ test('state lives in ~/.claude/mynameisjev', () => {
   s.enabled = true;
   st.writeState(s);
   assert.strictEqual(st.readState().enabled, true);
+});
+
+test('Codex limits older than seven days expire on read', () => {
+  const state = st.readState();
+  state.codexLimits = { readonly: new Date(Date.now() - 8 * 86400000).toISOString(), network: new Date().toISOString() };
+  st.writeState(state);
+  assert.deepStrictEqual(Object.keys(st.readState().codexLimits), ['network']);
 });
 
 test('Codex is unavailable without the codex plugin', () => {
