@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.22
 
 - Read a Codex job's log only from inside its workspace, even through a
   symlink. Escape `$`, `"` and backticks in the companion path of the
