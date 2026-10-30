@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.23
 
 - Record session effort from main-session tool-use hooks, allowing `/effort`
   suggestions without Jev's status line after a tool call.
