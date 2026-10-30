@@ -82,6 +82,16 @@ async function watch(hookInput) {
   const current = st.readState();
   if (!current.enabled) return null;
   const ran = handOff(hookInput);
+  if (hookInput.session_id && !hookInput.agent_id && (ran?.target === 'codex' ||
+      /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput)) && resultFinished(hookInput))) {
+    try {
+      const ledger = require('./jev-handoff-ledger');
+      const command = shellCommand(hookInput);
+      const resultId = command.match(/codex-companion\.mjs"?\s+result\s+([\w-]+)/)?.[1];
+      ledger.register(current, hookInput, resultId, ran?.target === 'codex' ? ran.reviewing : true);
+      st.writeState(current);
+    } catch (_) { /* Accounting never interrupts a tool call. */ }
+  }
   if (ran?.target === 'codex' || /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput))) {
     const output = JSON.stringify(hookInput.tool_response || '');
     // Denial wording only: bare EPERM/EACCES also show up in code Codex reports on.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Record local Codex rollout tokens and Claude hand-off overhead in the report,
+  with a per-session view and unknown values for missing data.
+
 ## 0.3.23
 
 - Record session effort from main-session tool-use hooks, allowing `/effort`

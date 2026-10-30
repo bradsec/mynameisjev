@@ -546,8 +546,12 @@ status line shows `off in project` or `project config error`, and
 - `Codex results returned`, how many Claude fixed itself and sent back to Codex
 - tokens used by `mynameisjev:*` subagents per model (input, cache write,
   cache read, output), read from their transcripts when they finish
+- Codex tokens per model from local rollout files, plus total and mean Claude
+  brief and review tokens per hand-off. Use `report --session` for this session.
 
-Codex tasks bill your ChatGPT plan, so their tokens are not counted.
+Missing Codex rollout or Claude transcript data appears as unknown. The ledger
+keeps the last 50 sessions locally. Codex tasks still bill your ChatGPT plan;
+the report does not convert tokens to dollars.
 
 ## Optional features
 

@@ -1,5 +1,5 @@
 ---
-description: Show what Jev routed, which hand-offs ran, and helper token use
+description: Show routing, hand-offs, helper tokens, and Codex hand-off tokens
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---

@@ -165,7 +165,7 @@ function printCosts() {
   }
 }
 
-async function report() {
+async function report(reportArgs = []) {
   const s = state.stats;
   const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
   printCosts();
@@ -191,9 +191,36 @@ async function report() {
       console.log(`  ${f.padEnd(7)} ${String(t.runs).padStart(4)} runs   input ${fmt(t.input)}, cache write ${fmt(t.cacheWrite)}, cache read ${fmt(t.cacheRead)}, output ${fmt(t.output)}`);
     }
   }
+  const ledger = state.handoffLedger || {};
+  const sessions = reportArgs.includes('--session') ? (sessionId && ledger[sessionId] ? [ledger[sessionId]] : []) : Object.values(ledger);
+  const tasks = sessions.flatMap((session) => session.tasks || []);
+  const byModel = {};
+  let unknown = 0;
+  let overhead = 0;
+  let overheadKnown = 0;
+  for (const task of tasks) {
+    if (!task.codex) unknown++;
+    else {
+      const model = task.codex.model;
+      const total = byModel[model] || (byModel[model] = { runs: 0, input: 0, cacheRead: 0, output: 0, reasoningOutput: 0 });
+      total.runs++;
+      for (const key of ['input', 'cacheRead', 'output', 'reasoningOutput']) total[key] += task.codex[key];
+    }
+    if (task.claude) {
+      overheadKnown++;
+      overhead += task.claude.input + task.claude.cacheWrite + task.claude.cacheRead + task.claude.output;
+    }
+  }
+  console.log(`Codex tokens${reportArgs.includes('--session') ? ' (this session)' : ''}:`);
+  for (const [model, t] of Object.entries(byModel)) {
+    console.log(`  ${model}: ${t.runs} tasks, input ${fmt(t.input)}, cached input ${fmt(t.cacheRead)}, output ${fmt(t.output)}, reasoning output ${fmt(t.reasoningOutput)}`);
+  }
+  if (!Object.keys(byModel).length) console.log('  none recorded yet');
+  if (unknown) console.log(`  unknown: ${unknown} tasks`);
+  console.log(`Claude hand-off overhead: ${overheadKnown ? `${fmt(overhead)} total, ${fmt(Math.round(overhead / overheadKnown))} mean per hand-off (${overheadKnown} measured)` : 'unknown'}`);
   print([
     'Runs count every mynameisjev:* subagent and Codex task, including ones started without a Jev note.',
-    'Codex tasks bill your ChatGPT plan, so their tokens are not counted here.',
+    'Codex tokens come from local rollout files; missing data shows as unknown.',
   ]);
 }
 
