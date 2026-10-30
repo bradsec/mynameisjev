@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.24
 
 - Record local Codex rollout tokens and Claude hand-off overhead in the report,
   with a per-session view and unknown values for missing data.
