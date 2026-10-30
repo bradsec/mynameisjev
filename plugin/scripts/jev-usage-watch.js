@@ -76,6 +76,9 @@ function handOff(hookInput) {
 }
 
 async function watch(hookInput) {
+  if (hookInput.session_id && !hookInput.agent_id && typeof hookInput.effort?.level === 'string') {
+    st.shareEffort(hookInput.session_id, hookInput.effort.level);
+  }
   const current = st.readState();
   if (!current.enabled) return null;
   const ran = handOff(hookInput);

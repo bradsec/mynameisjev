@@ -236,6 +236,16 @@ test('codex notes: full guidance once per session, then a short pointer', () => 
   assert.ok(steps.length < 700);
 });
 
+test('first full Codex note names project instructions, later note stays short', () => {
+  const project = path.join(tmp, 'instructions');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Rules\n');
+  const note = (guided) => router.routeAdvice('everyday', result({ coding: 0.9 }),
+    ctx({ codexNow: codexOk, review: true, guided, cwd: project })).note;
+  assert.match(note(false), /Codex reads AGENTS\.md here\. Claude can omit those project rules from the brief\./);
+  assert.doesNotMatch(note(true), /Codex reads AGENTS\.md here/);
+});
+
 test('Codex notes mention recent limits only', () => {
   const note = (codexLimits) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, codexLimits })).note;
   assert.match(note({ readonly: new Date().toISOString(), network: new Date().toISOString() }), /Codex recently hit a read-only sandbox/);

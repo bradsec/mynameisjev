@@ -106,6 +106,7 @@ async function status() {
   }
 
   console.log(`Codex: ${available ? 'available' : 'not available (needs the codex plugin enabled and the codex CLI on PATH)'}`);
+  print(sync.projectInstructions(st.projectDir(process.cwd())).lines);
   if (available) {
     const usable = project && !project.error ? project : null;
     console.log(`Prefer: ${st.preferFor(state, sessionId, usable)} in this session, ${state.prefer} by default (/mynameisjev:prefer [--default] codex | claude)`);
@@ -263,10 +264,14 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
 }
 
 async function syncCommand([arg]) {
-  if (toggle('sync', 'Sync', arg) && !state.sync) return;
+  if (toggle('sync', 'Sync', arg) && !state.sync) {
+    print(sync.projectInstructions(st.projectDir(process.cwd())).lines);
+    return;
+  }
   if (arg && arg !== 'on') throw new Error('usage: /mynameisjev:sync [on | off]');
   if (!state.sync) {
     console.log('Sync is off; turn it on with /mynameisjev:sync on. It generates ~/.codex/AGENTS.md from ~/.claude/CLAUDE.md (replacing the current file, with one backup), sets up the RTK Claude hook and reports plugins Codex lacks.');
+    print(sync.projectInstructions(st.projectDir(process.cwd())).lines);
     return;
   }
   const chosen = skills.outputStyle(state.outputStyle);

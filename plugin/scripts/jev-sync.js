@@ -17,9 +17,11 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
 const exec = require('./jev-exec');
 const skills = require('./jev-skills');
 const plugins = require('./jev-plugins');
+const st = require('./jev-state');
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -39,6 +41,67 @@ function readText(file) {
   } catch (e) {
     return null;
   }
+}
+
+function fallbackConfig() {
+  const file = path.join(st.codexHome, 'config.toml');
+  const content = readText(file);
+  if (content === null) return fs.existsSync(file) ? 'unknown' : false;
+  let section = '';
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (/^\[/.test(line)) { section = line; continue; }
+    if (section || !/^project_doc_fallback_filenames\s*=/.test(line)) continue;
+    let value = line.slice(line.indexOf('=') + 1).trimStart();
+    let tokens;
+    do {
+      tokens = value.match(/\[|\]|"(?:\\.|[^"\\])*"|'[^']*'|,|#[^\n]*|\s+/g) || [];
+      if (tokens.join('') === value && tokens.includes(']')) break;
+      if (i + 1 === lines.length) return 'unknown';
+      value += '\n' + lines[++i];
+    } while (true);
+    if (tokens.join('') !== value || tokens[0]?.trim() !== '[') return 'unknown';
+    const names = [];
+    let expectName = true;
+    let closed = false;
+    for (const token of tokens.slice(1)) {
+      if (/^\s+$/.test(token) || token.startsWith('#')) continue;
+      if (token === ']') { closed = true; break; }
+      if (token === ',') { if (expectName) return 'unknown'; expectName = true; continue; }
+      if (!expectName || !/^['"]/.test(token)) return 'unknown';
+      try { names.push(token[0] === '"' ? JSON.parse(token) : token.slice(1, -1)); } catch (_) { return 'unknown'; }
+      expectName = false;
+    }
+    if (!closed || tokens.slice(tokens.indexOf(']') + 1).some((token) => !/^\s+$/.test(token) && !token.startsWith('#'))) return 'unknown';
+    return names.includes('CLAUDE.md');
+  }
+  return false;
+}
+
+function projectInstructions(cwd = process.cwd()) {
+  let root = cwd;
+  try { root = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch (_) {}
+  const claudeFile = path.join(root, 'CLAUDE.md');
+  const hasClaude = fs.existsSync(claudeFile);
+  const hasAgents = ['AGENTS.override.md', 'AGENTS.md'].some((name) => fs.existsSync(path.join(root, name)));
+  const fallback = hasAgents ? false : fallbackConfig();
+  const line = hasAgents ? 'Codex reads AGENTS.md here'
+    : hasClaude && fallback === true ? 'Codex reads CLAUDE.md here (fallback)'
+      : hasClaude && fallback === 'unknown' ? 'Codex project instructions unknown (config.toml is unparseable)'
+        : 'Codex sees no project instructions here';
+  const lines = [line];
+  if (hasClaude && !hasAgents && fallback === false) lines.push('Add to ~/.codex/config.toml: project_doc_fallback_filenames = ["CLAUDE.md"]');
+  if (hasClaude) {
+    const text = readText(claudeFile);
+    if (text === null) lines.push('Warning: cannot read project CLAUDE.md');
+    else {
+      if (/^@\S+\s*$/m.test(text)) lines.push('Warning: project CLAUDE.md has @file imports; Codex may not expand them.');
+      if (Buffer.byteLength(text) > 32768) lines.push('Warning: project CLAUDE.md exceeds the default 32 KiB instruction limit.');
+      if (/<!-- claude-only:start/.test(text)) lines.push('Warning: project CLAUDE.md has claude-only blocks that Codex reads raw.');
+    }
+  }
+  return { line, lines, readsProject: hasAgents || (hasClaude && fallback === true) };
 }
 
 function resolveImport(ref) {
@@ -159,7 +222,8 @@ async function ensureAll({ style = null, reason = 'off' } = {}) {
   } catch (e) {
     lines.push(`Codex AGENTS.md: could not write (${e.message})`);
   }
+  lines.push(...projectInstructions(st.projectDir(process.cwd())).lines);
   return lines;
 }
 
-module.exports = { buildAgents, agentsStatus, syncAgents, rtkStatus, rtkBinary, rtkClaudeHook, ensureAll, agentsPath, backupPath };
+module.exports = { buildAgents, agentsStatus, syncAgents, projectInstructions, rtkStatus, rtkBinary, rtkClaudeHook, ensureAll, agentsPath, backupPath };

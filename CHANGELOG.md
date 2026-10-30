@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Record session effort from main-session tool-use hooks, allowing `/effort`
+  suggestions without Jev's status line after a tool call.
+- Report Codex project instruction discovery in status and sync, and mention
+  loaded project rules in the first full Codex note. Warn about raw Claude
+  imports, Claude-only blocks and the default instruction size limit.
+
 ## 0.3.22
 
 - Read a Codex job's log only from inside its workspace, even through a

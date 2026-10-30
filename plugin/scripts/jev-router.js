@@ -260,7 +260,7 @@ function effortLevel(score) {
   return EFFORT_LEVELS[Math.min(EFFORT_LEVELS.length - 1, Math.max(0, Math.round(score)))];
 }
 
-// The session's effort level as the status line last saw it, or null.
+// The session's effort level as tool-use hooks or the status line last saw it, or null.
 function sessionEffort(sessionId) {
   if (!sessionId) return null;
   try {
@@ -382,7 +382,7 @@ function routeAdvice(tier, result, ctx) {
   if (askedClaude(result)) return { suppress: 'the user asked Claude to do it' };
 
   const companion = codex.companionPath();
-  const opts = { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits };
+  const opts = { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits, cwd: ctx.cwd };
   // Codex first: Claude's usage is past the routing threshold, or the user
   // turned prefer-Codex mode on.
   const codexFirst = ctx.claudeLow || ctx.preferCodex;
@@ -414,7 +414,7 @@ const askedClaude = (result) => result.self !== null && result.self !== undefine
 // Codex whole: keep coordinating here, send the self-contained steps there.
 // `claude` is the usage peak when that is the reason, or null in prefer-Codex
 // mode. opts as for codexCall.
-function subStepAdvice(claude, companion, { review, guided, codexLimits } = {}) {
+function subStepAdvice(claude, companion, { review, guided, codexLimits, cwd } = {}) {
   const why = claude
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
@@ -423,7 +423,7 @@ function subStepAdvice(claude, companion, { review, guided, codexLimits } = {}) 
   return why +
     'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
     `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}` +
-    `${brief()} ` +
+    `${brief()}\n${projectInstructionNote(cwd)}` +
     (review
       ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ' +
         `The exception is small fixes while reviewing what Codex returned. ${REVIEW} `
@@ -578,10 +578,14 @@ const limitLine = (limits) => (limits?.readonly ? 'Codex recently hit a read-onl
 const RESUME_RULE = 'For a follow-up to the last Codex task (a fix, a send-back, an answer to its notes) add --resume-last, ' +
   'so Codex continues in the same thread with its context; without it each task starts a new thread. ' +
   'It picks the latest completed task in this session; if another task is in flight or finished later, start fresh with a self-contained brief.';
+const projectInstructionNote = (cwd) => {
+  const project = sync.projectInstructions(cwd);
+  return project.readsProject ? `${project.line}. Claude can omit those project rules from the brief.\n` : '';
+};
 
 // opts.review: Claude checks each Codex result and fixes small issues
 // itself. opts.guided: this session already has the full text.
-function codexCall(choice, companion, { review, guided, codexLimits } = {}) {
+function codexCall(choice, companion, { review, guided, codexLimits, cwd } = {}) {
   const flags = [
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
@@ -591,7 +595,7 @@ function codexCall(choice, companion, { review, guided, codexLimits } = {}) {
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash on Windows too.
     `${taskCommand(companion, flags)}\n` +
-    `${brief()}\n` +
+    `${brief()}\n${projectInstructionNote(cwd)}` +
     `${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}For long multi-step work add --background; it prints a job ID. ` +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
@@ -640,7 +644,7 @@ function overrideAdvice(o, ctx) {
   }
   const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache, true);
   return {
-    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits })}`,
+    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits, cwd: ctx.cwd })}`,
     route: ['codex', choice.model || 'default', 'suggested'],
     // Asked for explicitly, so it goes even when usage looks high; the user
     // hears why it may fail.
@@ -889,7 +893,7 @@ function main() {
       // projects that turn sizing off.
       const override = parseOverride(prompt);
       if (override) {
-        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits });
+        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits, cwd });
         state.stats.forced += 1;
         if (o.route[0] === 'codex') st.markGuided(state, sessionId, review);
         setRoute(state, ...o.route, sessionId, o.effort);
@@ -959,7 +963,7 @@ function main() {
           setRoute(state, 'codex', 'steps', 'suggested', sessionId);
           st.markGuided(state, sessionId, review);
           writeState(state);
-          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion, { review, guided, codexLimits: state.codexLimits }) };
+          output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: subStepAdvice(isLow ? claude : null, companion, { review, guided, codexLimits: state.codexLimits, cwd }) };
         }
       } else {
         // Tier counts record sizing; `suppressed` (outside the total) counts
@@ -984,6 +988,7 @@ function main() {
           codexNow,
           codexCache,
           codexLimits: state.codexLimits,
+          cwd,
           overrides: state.codexTiers,
         });
         if (advice.note) {

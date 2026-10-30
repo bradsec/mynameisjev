@@ -348,8 +348,9 @@ The same call also scores how much reasoning effort each message needs
 (low, medium, high or xhigh), separately from its size, and Jev suggests
 `/effort` on the same pattern: 5 messages in a row needing less effort than
 the session runs at, or 3 needing more. This needs the session's effort
-level, which only the status line sees, so it works with Jev's status line
-installed or wrapped, and stays quiet on models without an effort setting.
+level, which tool-use hooks or Jev's status line record. It works without
+Jev's status line after the first tool call with an effort level, and stays
+quiet on models without an effort setting.
 `/mynameisjev:status` counts the suggestions shown.
 
 ### Topic shifts and handoffs
@@ -428,6 +429,13 @@ quality. Codex ends with files changed, checks run and Notes for the lead.
 With the `rtk` CLI on your `PATH`, the brief also tells Codex to prefix its
 shell commands with `rtk`. Claude uses its own installed skills the same way.
 Codex briefs use a quoted heredoc to preserve shell-sensitive text.
+The first full Codex note says when Codex reads project instructions, so
+Claude can omit those rules from the brief. `/mynameisjev:status` and
+`/mynameisjev:sync` report whether Codex reads the project's `AGENTS.md` or
+`CLAUDE.md`. If only `CLAUDE.md` exists, they show the
+`project_doc_fallback_filenames = ["CLAUDE.md"]` line to add to Codex config.
+They warn about `@file` imports, Claude-only blocks, and files over 32 KiB.
+The check never edits Codex config.
 Follow-ups use `--resume-last` to keep the task's context.
 
 The first Codex note in a session carries this guidance in full; later notes

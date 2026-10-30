@@ -31,6 +31,42 @@ test('skips generation when Codex is not installed', () => {
   assert.match(sync.syncAgents({ style: null }), /skipped/);
 });
 
+test('project instruction check follows Codex file precedence and fallback config', () => {
+  const project = path.join(tmp, 'project');
+  fs.mkdirSync(project, { recursive: true });
+  const config = path.join(codexHome, 'config.toml');
+  fs.mkdirSync(codexHome, { recursive: true });
+  const check = () => sync.projectInstructions(project);
+  assert.strictEqual(check().line, 'Codex sees no project instructions here');
+  fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Rules\n');
+  assert.deepStrictEqual(check().lines.slice(0, 2), [
+    'Codex sees no project instructions here',
+    'Add to ~/.codex/config.toml: project_doc_fallback_filenames = ["CLAUDE.md"]',
+  ]);
+  fs.writeFileSync(config, '[other]\nproject_doc_fallback_filenames = ["CLAUDE.md"]\n');
+  assert.strictEqual(check().line, 'Codex sees no project instructions here');
+  fs.writeFileSync(config, 'project_doc_fallback_filenames = ["OTHER.md", "CLAUDE.md"]\n');
+  assert.strictEqual(check().line, 'Codex reads CLAUDE.md here (fallback)');
+  fs.writeFileSync(config, 'project_doc_fallback_filenames = [\n  "bracket].md",\n  "CLAUDE.md", # included\n]\n');
+  assert.strictEqual(check().line, 'Codex reads CLAUDE.md here (fallback)');
+  fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Agents\n');
+  assert.strictEqual(check().line, 'Codex reads AGENTS.md here');
+  fs.writeFileSync(path.join(project, 'AGENTS.override.md'), '# Override\n');
+  assert.strictEqual(check().line, 'Codex reads AGENTS.md here');
+});
+
+test('project instruction check reports unknown config and raw Claude warnings', () => {
+  const project = path.join(tmp, 'warnings');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'CLAUDE.md'), '@rules.md\n<!-- claude-only:start -->\n' + 'x'.repeat(32768));
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), 'project_doc_fallback_filenames = [not-valid]\n');
+  const lines = sync.projectInstructions(project).lines;
+  assert.match(lines[0], /unknown/);
+  assert.ok(lines.some((line) => /@file imports/.test(line)));
+  assert.ok(lines.some((line) => /32 KiB/.test(line)));
+  assert.ok(lines.some((line) => /claude-only/.test(line)));
+});
+
 test('generated AGENTS.md: title swapped, claude-only removed, imports inlined', () => {
   fs.mkdirSync(codexHome, { recursive: true });
   const text = sync.buildAgents({ style: null });

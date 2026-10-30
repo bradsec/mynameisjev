@@ -14,6 +14,7 @@ const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.cla
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const dataDir = path.join(claudeDir, 'mynameisjev');
 const statePath = path.join(dataDir, 'state.json');
+const EFFORT_KEEP_MS = 2 * 24 * 60 * 60 * 1000;
 
 // Path of a file in the data directory, creating the directory on first use.
 function dataFile(name) {
@@ -44,6 +45,20 @@ function writeFileAtomic(file, text) {
       return;
     }
   }
+}
+
+function shareEffort(session, level) {
+  let all = {};
+  let file;
+  try { file = dataFile('session-effort.json'); } catch (_) { return; }
+  try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) {}
+  if (all[session] && all[session].level === level) return;
+  const now = Date.now();
+  for (const [id, value] of Object.entries(all)) {
+    if (!value || !(now - value.at < EFFORT_KEEP_MS)) delete all[id];
+  }
+  all[session] = { level, at: now };
+  try { writeFileAtomic(file, JSON.stringify(all)); } catch (_) {}
 }
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -384,7 +399,7 @@ function projectDir(fallback) {
 }
 
 module.exports = {
-  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, DEFAULT_STATE, readState, writeState,
+  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, shareEffort, DEFAULT_STATE, readState, writeState,
   putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
 };

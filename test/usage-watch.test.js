@@ -23,6 +23,24 @@ const setUsage = (pct) => fs.writeFileSync(path.join(dataDir, 'claude-limits.jso
   JSON.stringify({ at: Date.now(), five_hour: { used_percentage: pct, resets_at: Math.floor(Date.now() / 1000) + 3600 } }));
 const hookInput = { session_id: 's', cwd: home, transcript_path: path.join(claudeDir, 'projects', 'p', 's.jsonl') };
 
+test('tool hook records main-session effort only when it changes', async () => {
+  setState({});
+  setUsage(10);
+  const file = path.join(dataDir, 'session-effort.json');
+  fs.rmSync(file, { force: true });
+  await watcher.watch({ ...hookInput, effort: { level: 'high' } });
+  const first = fs.readFileSync(file, 'utf8');
+  assert.strictEqual(JSON.parse(first).s.level, 'high');
+  await watcher.watch({ ...hookInput, effort: { level: 'high' } });
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), first);
+  await watcher.watch({ ...hookInput, effort: { level: 3 } });
+  await watcher.watch({ ...hookInput });
+  await watcher.watch({ ...hookInput, agent_id: 'child', effort: { level: 'low' } });
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), first);
+  await watcher.watch({ ...hookInput, effort: { level: 'medium' } });
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).s.level, 'medium');
+});
+
 test('records hand-offs that ran, even below the usage thresholds', async () => {
   setState({});
   setUsage(10);
