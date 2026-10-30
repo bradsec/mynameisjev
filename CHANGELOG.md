@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.25
 
 - Reject future-dated Codex routes when deciding whether edits are allowed.
 - Match hand-offs to Codex jobs by response ID or an unambiguous call window,
