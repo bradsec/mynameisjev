@@ -5,7 +5,6 @@ const path = require('path');
 const st = require('./jev-state');
 const jobs = require('./jev-codex-jobs');
 const { tokenUse } = require('./jev-subagent-stop');
-const { userText } = require('./jev-compact');
 
 const TAIL_BYTES = 8 * 1024 * 1024;
 const KEEP_SESSIONS = 50;
@@ -76,9 +75,9 @@ function codexUsage(threadId) {
   return null;
 }
 
-function matchingJob(sessionId, jobId) {
+function matchingJob(sessionId, jobId, window, claimed) {
   if (!sessionId) return null;
-  let best = null;
+  const matches = [];
   for (const root of jobs.stateRoots()) {
     let dirs;
     try { dirs = fs.readdirSync(root); } catch (_) { continue; }
@@ -87,20 +86,57 @@ function matchingJob(sessionId, jobId) {
       try { all = JSON.parse(fs.readFileSync(path.join(root, dir, 'state.json'), 'utf8')).jobs; } catch (_) { continue; }
       if (!Array.isArray(all)) continue;
       for (const job of all) {
-        if (job?.sessionId !== sessionId || (jobId && job.id !== jobId)) continue;
-        if (!best || Date.parse(job.updatedAt) > Date.parse(best.updatedAt)) best = job;
+        if (job?.sessionId !== sessionId || claimed.has(job.id)) continue;
+        if (jobId ? job.id !== jobId : !window || !Number.isFinite(window.from) || !Number.isFinite(window.to) ||
+            !Number.isFinite(Date.parse(job.createdAt)) ||
+            Date.parse(job.createdAt) < window.from || Date.parse(job.createdAt) > window.to) continue;
+        matches.push(job);
       }
     }
   }
-  return best;
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function toolWindow(data, toolUseId) {
+  if (!toolUseId) return null;
+  let offset = data.start;
+  let from = null;
+  for (const line of data.text.split('\n')) {
+    try {
+      const entry = JSON.parse(line);
+      const content = entry.message?.content;
+      if (Array.isArray(content)) {
+        if (content.some((part) => part.type === 'tool_use' && part.id === toolUseId)) {
+          from = { offset, at: Date.parse(entry.timestamp) };
+        }
+        if (from && content.some((part) => part.type === 'tool_result' && part.tool_use_id === toolUseId)) {
+          const to = Date.parse(entry.timestamp);
+          return { start: from.offset, from: from.at, to };
+        }
+      }
+    } catch (_) {}
+    offset += Buffer.byteLength(line) + 1;
+  }
+  return from && { start: from.offset, from: from.at, to: NaN };
 }
 
 function register(state, hookInput, jobId, returned = true) {
   const sessionId = hookInput.session_id;
   if (!sessionId) return;
-  const job = matchingJob(sessionId, jobId);
   const ledger = state.handoffLedger || (state.handoffLedger = {});
   const session = ledger[sessionId] || (ledger[sessionId] = { at: Date.now(), tasks: [] });
+  let data;
+  try { data = tail(hookInput.transcript_path); } catch (_) {}
+  const window = data && toolWindow(data, hookInput.tool_use_id);
+  const response = typeof hookInput.tool_response === 'string' ? hookInput.tool_response
+    : hookInput.tool_response?.stdout || '';
+  let parsedResponse;
+  try { parsedResponse = JSON.parse(response); } catch (_) {}
+  const responseId = parsedResponse?.jobId || response.match(/(?:^|\n)Job: ([\w-]+)/)?.[1] ||
+    response.match(/started in the background as (task-[\w-]+)\./)?.[1] || null;
+  const claimed = new Set(session.tasks.map((task) => task.jobId).filter(Boolean));
+  const exactId = jobId || responseId;
+  const job = matchingJob(sessionId, exactId, window, exactId ? new Set() : claimed);
   const existing = job?.id && session.tasks.find((task) => task.jobId === job.id);
   if (existing) {
     existing.returned = returned || existing.returned;
@@ -108,27 +144,7 @@ function register(state, hookInput, jobId, returned = true) {
     existing.codex = existing.codex || codexUsage(existing.threadId);
     return;
   }
-  const pending = job?.id && session.tasks.slice().reverse().find((task) => !task.jobId && !task.done);
-  if (pending) {
-    pending.jobId = job.id;
-    pending.returned = returned || pending.returned;
-    pending.threadId = UUID.test(job.threadId || '') ? job.threadId : null;
-    pending.codex = codexUsage(pending.threadId);
-    return;
-  }
-  let start = null;
-  try {
-    const data = tail(hookInput.transcript_path);
-    const lines = data.text.split('\n');
-    let offset = data.start;
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (userText(entry) !== null) start = offset;
-      } catch (_) {}
-      offset += Buffer.byteLength(line) + 1;
-    }
-  } catch (_) {}
+  const start = window?.start ?? null;
   const threadId = UUID.test(job?.threadId || '') ? job.threadId : null;
   session.tasks.push({ jobId: job?.id || null, threadId, codex: codexUsage(threadId), start, claude: null, returned, done: false });
   if (session.tasks.length > 100) session.tasks.splice(0, session.tasks.length - 100);
@@ -141,19 +157,14 @@ function finish(state, hookInput) {
   if (!session) return;
   let data;
   try { data = tail(hookInput.transcript_path); } catch (_) { return; }
-  let promptOffset = null;
-  let offset = data.start;
-  for (const line of data.text.split('\n')) {
-    try { if (userText(JSON.parse(line)) !== null) promptOffset = offset; } catch (_) {}
-    offset += Buffer.byteLength(line) + 1;
-  }
+  const starts = session.tasks.map((task) => task.start).filter((start) => start !== null).sort((a, b) => a - b);
   for (const task of session.tasks) {
-    if (!task.returned || task.done && task.endPrompt !== promptOffset) continue;
+    if (!task.returned || task.done) continue;
+    const end = starts.find((start) => start > task.start) ?? data.size;
     task.codex = task.codex || codexUsage(task.threadId);
-    task.claude = task.start !== null && task.start >= data.start
-      ? claudeUsage(data.buf.subarray(task.start - data.start).toString('utf8')) : null;
+    task.claude = task.start !== null && task.start >= data.start && end <= data.size
+      ? claudeUsage(data.buf.subarray(task.start - data.start, end - data.start).toString('utf8')) : null;
     task.done = true;
-    task.endPrompt = promptOffset;
   }
   const models = {};
   let claude = 0;

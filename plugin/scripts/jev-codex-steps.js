@@ -27,7 +27,8 @@ function guard(hookInput, state, nowMs, companion) {
   const route = st.routeFor(state, hookInput.session_id);
   if (!route || route.target !== 'codex') return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
-  if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;
+  const ageMs = nowMs - Date.parse(route.at);
+  if (!(ageMs >= 0 && ageMs <= ROUTE_MAX_AGE_MS)) return null;
   const review = st.reviewFor(state, hookInput.session_id);
   if (review && route.reviewing) return null;
   return {

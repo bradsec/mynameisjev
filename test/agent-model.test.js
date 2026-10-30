@@ -34,6 +34,7 @@ test('leaves the call alone otherwise', () => {
   assert.strictEqual(enforce(call(), state({ route: route({ how: 'session', model: 'opus' }) }), now), null, 'no suggestion');
   assert.strictEqual(enforce(call({}, { session_id: 's2' }), state(), now), null, 'other session');
   assert.strictEqual(enforce(call(), state({ route: route({ at: new Date(now - 2 * 3600000).toISOString() }) }), now), null, 'stale');
+  assert.strictEqual(enforce(call(), state({ route: route({ at: new Date(now + 24 * 3600000).toISOString() }) }), now), null, 'future route');
   assert.strictEqual(enforce(call({}, { tool_name: 'Bash' }), state(), now), null, 'not Agent');
 });
 

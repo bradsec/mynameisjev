@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Reject future-dated Codex routes when deciding whether edits are allowed.
+- Match hand-offs to Codex jobs by response ID or an unambiguous call window,
+  and keep Claude token windows separate for concurrent tasks.
+- Show Claude hand-off input, cache write, cache read and output separately.
+
 ## 0.3.24
 
 - Record local Codex rollout tokens and Claude hand-off overhead in the report,

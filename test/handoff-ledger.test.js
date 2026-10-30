@@ -46,17 +46,18 @@ test('records a background job across task and result, then finishes at Stop', (
   fs.writeFileSync(transcript, [
     { type: 'user', message: { content: [{ type: 'text', text: 'task' }] } },
     { type: 'assistant', message: { id: 'brief', model: 'claude-sonnet-4-5', usage: { input_tokens: 5, output_tokens: 2 } } },
+    { type: 'assistant', timestamp: '2026-10-30T00:00:00Z', message: { content: [{ type: 'tool_use', id: 'call', name: 'Bash' }] } },
   ].map(JSON.stringify).join('\n') + '\n');
   const state = {};
-  const hook = { session_id: 's', transcript_path: transcript };
+  const hook = { session_id: 's', transcript_path: transcript, tool_use_id: 'call' };
   ledger.register(state, hook, 'job-1', false);
   assert.equal(state.handoffLedger.s.tasks[0].returned, false);
   fs.appendFileSync(transcript, JSON.stringify({ type: 'assistant', message: { id: 'review', model: 'claude-sonnet-4-5', usage: { input_tokens: 7, output_tokens: 3 } } }) + '\n');
   ledger.register(state, hook, 'job-1', true);
   ledger.finish(state, hook);
-  assert.deepEqual(state.handoffLedger.s.tasks[0].claude, { input: 12, cacheWrite: 0, cacheRead: 0, output: 5 });
+  assert.deepEqual(state.handoffLedger.s.tasks[0].claude, { input: 7, cacheWrite: 0, cacheRead: 0, output: 3 });
   assert.equal(state.handoffLedger.s.tasks[0].codex.input, 10);
-  assert.deepEqual(state.handoffLedger.s.totals, { models: { 'gpt-6-sol': { runs: 1, input: 10, cacheRead: 2, output: 3, reasoningOutput: 1 } }, claude: 17, measured: 1, unknown: 0 });
+  assert.deepEqual(state.handoffLedger.s.totals, { models: { 'gpt-6-sol': { runs: 1, input: 10, cacheRead: 2, output: 3, reasoningOutput: 1 } }, claude: 10, measured: 1, unknown: 0 });
   ledger.register(state, hook, 'job-1', true);
   assert.equal(state.handoffLedger.s.tasks.length, 1);
   const dataDir = path.join(process.env.CLAUDE_CONFIG_DIR, 'mynameisjev');
@@ -66,5 +67,42 @@ test('records a background job across task and result, then finishes at Stop', (
     { encoding: 'utf8', env: { ...process.env, CLAUDE_CODE_SESSION_ID: 's' } });
   assert.match(output, /Codex tokens \(this session\):/);
   assert.match(output, /gpt-6-sol: 1 tasks, input 10, cached input 2, output 3, reasoning output 1/);
-  assert.match(output, /Claude hand-off overhead: 17 total, 17 mean per hand-off/);
+  assert.match(output, /Claude hand-off overhead: total input 7, cache write 0, cache read 0, output 3; mean per hand-off input 7, cache write 0, cache read 0, output 3 \(1 measured\)/);
+});
+
+test('uses response job ID and keeps simultaneous hand-offs separate', () => {
+  const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'data', 'codex-openai-codex', 'state', 'workspace');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ jobs: [
+    { id: 'first', sessionId: 'parallel', createdAt: '2026-10-30T00:00:01Z', updatedAt: '2026-10-30T00:00:05Z' },
+    { id: 'task-second', sessionId: 'parallel', createdAt: '2026-10-30T00:00:03Z', updatedAt: '2026-10-30T00:00:06Z' },
+  ] }));
+  const transcript = path.join(home, 'parallel.jsonl');
+  fs.writeFileSync(transcript, [
+    { type: 'user', message: { content: 'task' } },
+    { type: 'assistant', timestamp: '2026-10-30T00:00:00Z', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash' }] } },
+    { type: 'user', timestamp: '2026-10-30T00:00:02Z', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'ok' }] } },
+    { type: 'assistant', timestamp: '2026-10-30T00:00:02Z', message: { id: 'between', model: 'claude-sonnet-4-5', usage: { input_tokens: 2, output_tokens: 1 } } },
+    { type: 'assistant', timestamp: '2026-10-30T00:00:02Z', message: { content: [{ type: 'tool_use', id: 'call-2', name: 'Bash' }] } },
+    { type: 'user', timestamp: '2026-10-30T00:00:04Z', message: { content: [{ type: 'tool_result', tool_use_id: 'call-2', content: 'ok' }] } },
+    { type: 'assistant', message: { id: 'after', model: 'claude-sonnet-4-5', usage: { input_tokens: 3, output_tokens: 1 } } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  const state = {};
+  ledger.register(state, { session_id: 'parallel', transcript_path: transcript, tool_use_id: 'call-1' });
+  ledger.register(state, { session_id: 'parallel', transcript_path: transcript, tool_use_id: 'call-2', tool_response: { stdout: 'Task started in the background as task-second. Check status for progress.' } });
+  ledger.finish(state, { session_id: 'parallel', transcript_path: transcript });
+  assert.deepEqual(state.handoffLedger.parallel.tasks.map((t) => t.jobId), ['first', 'task-second']);
+  assert.deepEqual(state.handoffLedger.parallel.tasks.map((t) => t.claude?.input), [2, 3]);
+});
+
+test('ambiguous job window stays unknown', () => {
+  const transcript = path.join(home, 'parallel.jsonl');
+  const dir = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'data', 'codex-openai-codex', 'state', 'workspace');
+  const file = path.join(dir, 'state.json');
+  const data = JSON.parse(fs.readFileSync(file));
+  data.jobs.push({ id: 'third', sessionId: 'parallel', createdAt: '2026-10-30T00:00:03Z' });
+  fs.writeFileSync(file, JSON.stringify(data));
+  const state = {};
+  ledger.register(state, { session_id: 'parallel', transcript_path: transcript, tool_use_id: 'call-2' });
+  assert.equal(state.handoffLedger.parallel.tasks[0].jobId, null);
 });

@@ -196,7 +196,7 @@ async function report(reportArgs = []) {
   const tasks = sessions.flatMap((session) => session.tasks || []);
   const byModel = {};
   let unknown = 0;
-  let overhead = 0;
+  const overhead = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
   let overheadKnown = 0;
   for (const task of tasks) {
     if (!task.codex) unknown++;
@@ -208,7 +208,7 @@ async function report(reportArgs = []) {
     }
     if (task.claude) {
       overheadKnown++;
-      overhead += task.claude.input + task.claude.cacheWrite + task.claude.cacheRead + task.claude.output;
+      for (const key of Object.keys(overhead)) overhead[key] += task.claude[key];
     }
   }
   console.log(`Codex tokens${reportArgs.includes('--session') ? ' (this session)' : ''}:`);
@@ -217,7 +217,9 @@ async function report(reportArgs = []) {
   }
   if (!Object.keys(byModel).length) console.log('  none recorded yet');
   if (unknown) console.log(`  unknown: ${unknown} tasks`);
-  console.log(`Claude hand-off overhead: ${overheadKnown ? `${fmt(overhead)} total, ${fmt(Math.round(overhead / overheadKnown))} mean per hand-off (${overheadKnown} measured)` : 'unknown'}`);
+  const overheadFields = (values) => `input ${fmt(values.input)}, cache write ${fmt(values.cacheWrite)}, cache read ${fmt(values.cacheRead)}, output ${fmt(values.output)}`;
+  const overheadMean = Object.fromEntries(Object.entries(overhead).map(([key, value]) => [key, Math.round(value / overheadKnown)]));
+  console.log(`Claude hand-off overhead: ${overheadKnown ? `total ${overheadFields(overhead)}; mean per hand-off ${overheadFields(overheadMean)} (${overheadKnown} measured)` : 'unknown'}`);
   print([
     'Runs count every mynameisjev:* subagent and Codex task, including ones started without a Jev note.',
     'Codex tokens come from local rollout files; missing data shows as unknown.',

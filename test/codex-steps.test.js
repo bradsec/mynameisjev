@@ -26,6 +26,7 @@ test('leaves the edit alone otherwise', () => {
   assert.strictEqual(guard(call(), state({ route: route({ target: 'claude', model: 'opus', how: 'session' }) }), now, companion), null, 'Claude route');
   assert.strictEqual(guard(call({ session_id: 's2' }), state(), now, companion), null, 'other session');
   assert.strictEqual(guard(call(), state({ route: route({ at: new Date(now - 2 * 3600000).toISOString() }) }), now, companion), null, 'stale');
+  assert.strictEqual(guard(call(), state({ route: route({ at: new Date(now + 24 * 3600000).toISOString() }) }), now, companion), null, 'future route');
   assert.strictEqual(guard(call({ tool_name: 'Bash' }), state(), now, companion), null, 'not an edit tool');
 });
 

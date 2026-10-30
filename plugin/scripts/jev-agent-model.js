@@ -29,7 +29,8 @@ function enforce(hookInput, state, nowMs) {
   const route = st.routeFor(state, hookInput.session_id);
   if (!route || route.target !== 'claude' || route.how !== 'suggested' || !HELPER_MODELS.has(route.model)) return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
-  if (!(nowMs - Date.parse(route.at) <= ROUTE_MAX_AGE_MS)) return null;
+  const ageMs = nowMs - Date.parse(route.at);
+  if (!(ageMs >= 0 && ageMs <= ROUTE_MAX_AGE_MS)) return null;
   const effort = input.effort || route.effort;
   return {
     hookSpecificOutput: {
