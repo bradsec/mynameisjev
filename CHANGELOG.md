@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.26
+
+- Refuse extra arguments to commands, such as `check on extra`, before
+  changing any setting, and reject `report` arguments other than `--session`.
+- `/mynameisjev:transfer` with an argument other than `on` or `off` now shows
+  its usage error, like the other toggles.
+- `/mynameisjev:handoff` adds a numeric suffix instead of returning the path of
+  a note written earlier in the same second.
+
 ## 0.3.25
 
 - Reject future-dated Codex routes when deciding whether edits are allowed.
