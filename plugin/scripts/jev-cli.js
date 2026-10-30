@@ -32,6 +32,13 @@ const COMMANDS = {
   decide: decideCommand, check: checkCommand, compare: compareCommand,
   tiebreak: tiebreakCommand, 'tiebreak-status': tiebreakStatus,
 };
+// Most arguments a command takes; extra ones are refused before any state
+// write. Commands not listed parse their own arguments.
+const MAX_ARGS = {
+  on: 0, off: 0, status: 0, limits: 0, handoff: 0, 'tiebreak-status': 0,
+  report: 1, sync: 1, style: 1, update: 1, transfer: 1, coldguard: 1, enforce: 1, check: 1, tiebreak: 1,
+  statusline: 2, codex: 4,
+};
 
 (async () => {
   const run = COMMANDS[cmd];
@@ -40,6 +47,9 @@ const COMMANDS = {
     return;
   }
   try {
+    if (args.length > (MAX_ARGS[cmd] ?? Infinity)) {
+      throw new Error(`/mynameisjev:${cmd} takes at most ${MAX_ARGS[cmd]} argument${MAX_ARGS[cmd] === 1 ? '' : 's'}, got: ${args.join(' ')}`);
+    }
     await run(args);
   } catch (e) {
     console.log(`Error: ${e.message}`);
@@ -166,6 +176,7 @@ function printCosts() {
 }
 
 async function report(reportArgs = []) {
+  if (reportArgs.some((a) => a !== '--session')) throw new Error('usage: /mynameisjev:report [--session]');
   const s = state.stats;
   const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
   printCosts();
@@ -396,14 +407,17 @@ async function checkCommand([arg]) {
 }
 
 // A new file for /mynameisjev:handoff to write, outside the project so it is
-// never committed: <data dir>/handoffs/<project>-<YYYYMMDD-HHMMSS>.md.
+// never committed: <data dir>/handoffs/<project>-<YYYYMMDD-HHMMSS>.md, with
+// -2, -3 and so on when that file already exists.
 async function handoffPath() {
   const dir = st.projectDir(process.cwd());
   const name = path.basename(dir || 'session').replace(/[^A-Za-z0-9._-]/g, '-') || 'session';
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
   const folder = path.join(st.dataDir, 'handoffs');
   fs.mkdirSync(folder, { recursive: true });
-  console.log(path.join(folder, `${name}-${stamp}.md`));
+  let file = path.join(folder, `${name}-${stamp}.md`);
+  for (let n = 2; fs.existsSync(file); n++) file = path.join(folder, `${name}-${stamp}-${n}.md`);
+  console.log(file);
 }
 
 // decide and compare read their input as JSON on stdin; the commands pass it
@@ -475,6 +489,7 @@ async function transferCommand([arg]) {
     if (state.autoTransfer && !codex.codexAvailable()) console.log('Note: Codex is not available, so nothing is transferred until it is.');
     return;
   }
+  if (arg) throw new Error('usage: /mynameisjev:transfer [on | off]');
   console.log(`Auto-transfer: ${onOff(state.autoTransfer)}. From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the codex resume command. usage: /mynameisjev:transfer [on | off]`);
 }
 
