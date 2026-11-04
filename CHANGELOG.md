@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- At each session end, stop Codex background servers whose starting Claude
+  Code process has exited and that have no task connected on two checks 2
+  seconds apart (Linux). Servers started in other directories after `cd`
+  used to keep running for days.
+
 ## 0.3.26
 
 - Refuse extra arguments to commands, such as `check on extra`, before

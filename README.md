@@ -607,6 +607,13 @@ The generated `AGENTS.md`:
   The status line command uses a forward-slash path, which Git Bash needs.
 - **Codex background server restart** after a Codex plugin or CLI update is
   automatic on Linux. On macOS and Windows, restart Claude Code instead.
+- **Leftover Codex background servers** are stopped when any session ends.
+  The Codex plugin stops only the server for a session's last directory, so
+  servers started in other directories after `cd` keep running. Jev stops a
+  server only when the Claude Code process that started it has exited and no
+  task is connected to it, checked twice 2 seconds apart; a session's own
+  servers are left alone while it runs. Linux only; on macOS and Windows,
+  stop leftover `app-server-broker.mjs` processes yourself.
 - **Claude Code plugin reloads** can't be triggered by a script on any
   platform: run `/reload-plugins` after `/mynameisjev:update`.
 

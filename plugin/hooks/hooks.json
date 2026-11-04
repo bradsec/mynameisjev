@@ -197,6 +197,18 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/jev-codex-reap.js"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
