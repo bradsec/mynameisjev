@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.27
 
 - At each session end, stop Codex background servers whose starting Claude
   Code process has exited and that have no task connected on two checks 2
