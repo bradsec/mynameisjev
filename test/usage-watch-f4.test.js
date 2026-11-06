@@ -6,6 +6,7 @@ const path = require('path');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-watch-f4-'));
 process.env.HOME = home;
+process.env.USERPROFILE = home;
 process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude');
 process.env.CODEX_HOME = path.join(home, '.codex');
 const dataDir = path.join(process.env.CLAUDE_CONFIG_DIR, 'mynameisjev');
@@ -17,6 +18,7 @@ fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'settings.json'), JSON
 const bin = path.join(home, 'bin');
 fs.mkdirSync(bin);
 fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+fs.writeFileSync(path.join(bin, 'codex.cmd'), '@exit /b 1\r\n');
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
 
 const { watch } = require('../plugin/scripts/jev-usage-watch');

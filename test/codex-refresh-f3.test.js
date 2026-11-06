@@ -14,6 +14,7 @@ test('refresh records an app-server early exit and removes its lock', () => {
     fs.mkdirSync(dataDir, { recursive: true });
     fs.mkdirSync(binDir);
     fs.writeFileSync(path.join(binDir, 'codex'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(binDir, 'codex.cmd'), '@exit /b 3\r\n');
     fs.writeFileSync(path.join(dataDir, 'codex-refresh.lock'), 'lock');
 
     const result = spawnSync(process.execPath, [path.join(__dirname, '../plugin/scripts/jev-codex.js'), 'refresh'], {
@@ -22,6 +23,7 @@ test('refresh records an app-server early exit and removes its lock', () => {
       env: {
         ...process.env,
         HOME: home,
+        USERPROFILE: home,
         CLAUDE_CONFIG_DIR: claude,
         CODEX_HOME: path.join(home, '.codex'),
         PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`,
