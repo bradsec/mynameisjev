@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.28
 
 - Record the Codex job and token use for foreground Codex hand-offs. The
   hand-off command now prints the Codex thread ID on success, and the ledger
