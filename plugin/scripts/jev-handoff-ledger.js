@@ -75,7 +75,7 @@ function codexUsage(threadId) {
   return null;
 }
 
-function matchingJob(sessionId, jobId, window, claimed) {
+function matchingJob(sessionId, jobId, threadId, window, claimed) {
   if (!sessionId) return null;
   const matches = [];
   for (const root of jobs.stateRoots()) {
@@ -87,13 +87,15 @@ function matchingJob(sessionId, jobId, window, claimed) {
       if (!Array.isArray(all)) continue;
       for (const job of all) {
         if (job?.sessionId !== sessionId || claimed.has(job.id)) continue;
-        if (jobId ? job.id !== jobId : !window || !Number.isFinite(window.from) || !Number.isFinite(window.to) ||
+        if (jobId ? job.id !== jobId : threadId ? job.threadId !== threadId : !window || !Number.isFinite(window.from) || !Number.isFinite(window.to) ||
             !Number.isFinite(Date.parse(job.createdAt)) ||
             Date.parse(job.createdAt) < window.from || Date.parse(job.createdAt) > window.to) continue;
         matches.push(job);
       }
     }
   }
+  if (threadId && !jobId) return matches.reduce((newest, job) =>
+    !newest || Date.parse(job.createdAt) > Date.parse(newest.createdAt) ? job : newest, null);
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -106,10 +108,10 @@ function toolWindow(data, toolUseId) {
       const entry = JSON.parse(line);
       const content = entry.message?.content;
       if (Array.isArray(content)) {
-        if (content.some((part) => part.type === 'tool_use' && part.id === toolUseId)) {
+        if (entry.type === 'assistant' && content.some((part) => part.type === 'tool_use' && part.id === toolUseId)) {
           from = { offset, at: Date.parse(entry.timestamp) };
         }
-        if (from && content.some((part) => part.type === 'tool_result' && part.tool_use_id === toolUseId)) {
+        if (from && entry.type === 'user' && content.some((part) => part.type === 'tool_result' && part.tool_use_id === toolUseId)) {
           const to = Date.parse(entry.timestamp);
           return { start: from.offset, from: from.at, to };
         }
@@ -134,9 +136,10 @@ function register(state, hookInput, jobId, returned = true) {
   try { parsedResponse = JSON.parse(response); } catch (_) {}
   const responseId = parsedResponse?.jobId || response.match(/(?:^|\n)Job: ([\w-]+)/)?.[1] ||
     response.match(/started in the background as (task-[\w-]+)\./)?.[1] || null;
+  const responseThread = response.match(/(?:^|\n)\[codex\] Thread ready \(([0-9a-f-]{36})\)\.(?:\n|$)/i)?.[1];
   const claimed = new Set(session.tasks.map((task) => task.jobId).filter(Boolean));
   const exactId = jobId || responseId;
-  const job = matchingJob(sessionId, exactId, window, exactId ? new Set() : claimed);
+  const job = matchingJob(sessionId, exactId, UUID.test(responseThread || '') ? responseThread : null, window, exactId ? new Set() : claimed);
   const existing = job?.id && session.tasks.find((task) => task.jobId === job.id);
   if (existing) {
     existing.returned = returned || existing.returned;

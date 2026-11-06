@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Record the Codex job and token use for foreground Codex hand-offs. The
+  hand-off command now prints the Codex thread ID on success, and the ledger
+  matches it, choosing the newest unclaimed job when a resumed thread has
+  several.
+- Stop the AGENTS.md sync from reading its own output back in when
+  `~/.claude/CLAUDE.md` imports a file named `AGENTS.md`, which grew
+  `~/.codex/AGENTS.md` by one copy per prompt.
+- Record an error and release the lock when `codex app-server` exits at once
+  during a limits refresh, instead of crashing with `EPIPE`.
+- Ignore subagent tool calls for usage threshold notices, so a subagent can
+  no longer consume the main session's 80% notice.
+
 ## 0.3.27
 
 - At each session end, stop Codex background servers whose starting Claude

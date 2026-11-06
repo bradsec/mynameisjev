@@ -135,6 +135,7 @@ async function watch(hookInput) {
     current.stats.reviewFixes = (current.stats.reviewFixes || 0) + 1;
     try { st.writeState(current); } catch (e) { /* the report misses one */ }
   }
+  if (hookInput.agent_id) return null;
   if (peakPct() < FAST_PATH_PCT) return null;
 
   const r = require('./jev-router');

@@ -9,8 +9,9 @@
 //   are left out (Claude-specific rules such as the Jev routing rule).
 // - `@file` import lines are replaced by the file's contents, because Codex
 //   does not expand them. A same-named file in ~/.codex wins over the Claude
-//   one, so Codex can have its own variant (its RTK.md tells the agent to
-//   prefix commands with `rtk`, which Claude gets from a hook instead).
+//   one, except generated output and backup, so Codex can have its own variant
+//   (its RTK.md tells the agent to prefix commands with `rtk`, which Claude
+//   gets from a hook instead).
 // - ~/.codex/AGENTS.local.md, if present, is appended for Codex-only rules.
 // - The selected output-style skill block goes last, when set.
 
@@ -114,7 +115,7 @@ function resolveImport(ref) {
 function importContent(ref) {
   const claudeFile = resolveImport(ref);
   const codexFile = path.join(codexHome, path.basename(claudeFile));
-  const codexText = readText(codexFile);
+  const codexText = codexFile === agentsPath || codexFile === backupPath ? null : readText(codexFile);
   if (codexText !== null) return { text: codexText.trim(), from: codexFile };
   const claudeText = readText(claudeFile);
   if (claudeText === null) return null;

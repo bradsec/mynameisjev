@@ -71,7 +71,7 @@ function taskCommand(companion, flags, placeholder) {
   let delimiter;
   do { delimiter = `JEV_BRIEF_${crypto.randomBytes(3).toString('hex')}`; } while (placeholder.split('\n').includes(delimiter));
   const script = companion.replace(/\\/g, '/').replace(/["`$]/g, '\\$&');
-  return `jev_err=$(mktemp) || exit $?\nnode "${script}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -ne 0 ]; then tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
+  return `jev_err=$(mktemp) || exit $?\nnode "${script}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -eq 0 ]; then grep -F '[codex] Thread ready (' "$jev_err" | head -n 1 || :; else tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
 }
 
 // Newest installed codex plugin's companion script, or null when the plugin
@@ -96,13 +96,18 @@ function queryAppServer() {
     const proc = exec.spawnCli('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] });
     const pending = new Map();
     let nextId = 0;
+    let finished = false;
     const finish = (err, value) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       proc.kill();
       if (err) reject(err); else resolve(value);
     };
     const timer = setTimeout(() => finish(new Error(`codex app-server timed out after ${REFRESH_TIMEOUT_MS}ms`)), REFRESH_TIMEOUT_MS);
     proc.on('error', (e) => finish(new Error(`cannot start codex: ${e.message}`)));
+    proc.on('close', (code, signal) => finish(new Error(`codex app-server exited ${signal ? `on ${signal}` : `with code ${code}`}`)));
+    proc.stdin.on('error', (e) => finish(new Error(`codex app-server: ${e.message}`)));
     readline.createInterface({ input: proc.stdout }).on('line', (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch (e) { return; }
