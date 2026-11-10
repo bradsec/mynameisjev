@@ -14,9 +14,9 @@
 
 const st = require('./jev-state');
 
-// Subagent types that take the session's model unless told otherwise.
-const GENERAL_TYPES = new Set([undefined, null, '', 'general-purpose', 'claude']);
-const HELPER_MODELS = new Set(['haiku', 'sonnet', 'opus']);
+// Enforcement never injects Fable: it is the most expensive model, so a
+// Fable route runs only when Claude passes the model itself.
+const INJECTABLE_MODELS = new Set(st.MODEL_FAMILIES.filter((family) => family !== 'fable'));
 // A suggestion applies to the message it was made for; this bounds how long
 // a long turn keeps using it.
 const ROUTE_MAX_AGE_MS = 60 * 60 * 1000;
@@ -25,9 +25,9 @@ const ROUTE_MAX_AGE_MS = 60 * 60 * 1000;
 function enforce(hookInput, state, nowMs) {
   if (!state.enabled || !state.enforce || hookInput.tool_name !== 'Agent') return null;
   const input = hookInput.tool_input || {};
-  if (input.model || !GENERAL_TYPES.has(input.subagent_type)) return null;
+  if (input.model || !st.GENERAL_TYPES.has(input.subagent_type)) return null;
   const route = st.routeFor(state, hookInput.session_id);
-  if (!route || route.target !== 'claude' || route.how !== 'suggested' || !HELPER_MODELS.has(route.model)) return null;
+  if (!route || route.target !== 'claude' || route.how !== 'suggested' || !INJECTABLE_MODELS.has(route.model)) return null;
   if (!hookInput.session_id || route.session !== hookInput.session_id) return null;
   const ageMs = nowMs - Date.parse(route.at);
   if (!(ageMs >= 0 && ageMs <= ROUTE_MAX_AGE_MS)) return null;

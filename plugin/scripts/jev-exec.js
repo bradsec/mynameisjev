@@ -15,11 +15,13 @@ const { execFile, spawn } = require('child_process');
 const isWindows = process.platform === 'win32';
 
 // Full path of an executable on PATH, or null. File lookups only, so it is
-// cheap enough for hooks that run on every prompt.
+// cheap enough for hooks that run on every prompt. Empty and relative PATH
+// entries mean the current directory, which is often a project the user did
+// not write, so they are skipped.
 function findOnPath(name) {
   const exts = isWindows ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean) : [''];
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-    if (!dir) continue;
+    if (!path.isAbsolute(dir)) continue;
     for (const ext of exts) {
       const candidate = path.join(dir, name + ext);
       try {
@@ -40,10 +42,13 @@ function shellSafe(arg) {
 }
 
 // How to start `cmd`: { file, args, opts }. Throws when a Windows shim would
-// need an argument the shell can't take safely.
+// need an argument the shell can't take safely, and when a command name is
+// not on PATH there: Windows looks for a bare name in the current directory
+// first, so it is never started unresolved.
 function invocation(cmd, args, opts) {
   if (!isWindows) return { file: cmd, args, opts };
-  const resolved = findOnPath(cmd) || cmd;
+  const resolved = path.isAbsolute(cmd) ? cmd : findOnPath(cmd);
+  if (!resolved) throw new Error(`${cmd} not found on PATH`);
   if (!/\.(cmd|bat)$/i.test(resolved)) return { file: resolved, args, opts: { ...opts, windowsHide: true } };
   const bad = args.find((a) => !shellSafe(a));
   if (bad !== undefined) throw new Error(`refusing to pass ${JSON.stringify(bad)} to ${cmd} through the Windows shell`);

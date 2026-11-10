@@ -11,8 +11,6 @@ const fs = require('fs');
 const path = require('path');
 const st = require('./jev-state');
 
-const MODEL_FAMILIES = ['haiku', 'sonnet', 'opus', 'fable'];
-
 function transcriptPath(hookInput) {
   if (hookInput.agent_transcript_path) return hookInput.agent_transcript_path;
   if (!hookInput.transcript_path || !hookInput.session_id || !hookInput.agent_id) return null;
@@ -36,7 +34,7 @@ function tokenUse(text) {
   }
   const byModel = {};
   for (const msg of replies.values()) {
-    const family = MODEL_FAMILIES.find((f) => typeof msg.model === 'string' && msg.model.includes(f));
+    const family = st.MODEL_FAMILIES.find((f) => typeof msg.model === 'string' && msg.model.includes(f));
     if (!family) continue;
     const u = msg.usage;
     const t = byModel[family] || (byModel[family] = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 });

@@ -19,8 +19,10 @@ into a short routing note for Claude. One Jev call costs about $0.00002.
   only suggests a helper (`mynameisjev:tiny` on Haiku at low effort,
   `:everyday` on Sonnet at medium effort, `:large` on Opus at high effort,
   `:hardest` on Opus at extra-high effort) when it is cheaper, stronger, or
-  keeps bulky output out of your main context. Jev never suggests Fable;
-  it runs only when you pick it, for example with `/model`. Tiny jobs and
+  keeps bulky output out of your main context. Jev uses Fable only when you
+  request it with `+fable`, ask for it in plain language, or select it with
+  `/model`. `+fable` delegates to a general-purpose Fable subagent unless
+  the session already runs Fable. Tiny jobs and
   jobs that need the conversation stay put. `/mynameisjev:enforce on` makes
   general-purpose subagents use the suggested model.
 - **Topic-shift notices.** Tells you when a message starts an unrelated task,
@@ -139,7 +141,10 @@ To keep a status line of your own, wrap it instead:
 
 Jev's launcher then records the same data but prints your status line's
 output, unchanged. Your command gets the usual JSON on stdin and runs
-through a shell, as Claude Code runs it (`cmd.exe` on Windows). Its other
+through the same shell Claude Code uses for status lines: on Windows that is
+Git Bash when Git for Windows is installed, and PowerShell otherwise. If Git
+Bash is installed somewhere unusual, set `CLAUDE_CODE_GIT_BASH_PATH` to its
+`bash.exe`. Its other
 settings, such as `padding` and `refreshInterval`, are kept. `install` and
 `wrap` switch between the two; `uninstall` restores yours unwrapped.
 `/mynameisjev:statusline wrap --with-jev` adds the JEV segment (router state
@@ -317,7 +322,7 @@ score is a second opinion, not a test result.
 
 ## How routing works
 
-Eligible prompts get one Jev call with six questions, or seven when a prior
+Eligible prompts get one Jev call with seven questions, or eight when a prior
 message in the session is available. Skipped prompts and overrides get no
 Jev call. The router then adds a note to Claude's context, or stays silent:
 
@@ -382,6 +387,8 @@ so they also work without an API key and in projects with sizing off.
 | `+tiny`, `+everyday`, `+large`, `+hardest` | That Claude helper subagent |
 | `+codex`, `+codex:<size>` | Codex, with the model for that size (default `everyday`) |
 | `+claude` | The session's own model, no hand-off |
+| `+fable` | A general-purpose Fable subagent, or the session when it already runs Fable |
+| `+astra`, `+codex:astra` | Codex, with its current frontier model |
 
 Example: `+large research state management options and write a report`.
 Claude sees the prefix and is told it is a routing instruction. `!` is not
@@ -409,12 +416,30 @@ With Codex's list as of October 2026 the picks are:
 | large | `gpt-6.1-sol` | `gpt-6-astra` | medium |
 | hardest | `gpt-6.1-sol` | `gpt-6-astra` | high |
 
-Frontier models such as `gpt-6-astra` use Codex quota fastest, so Jev picks them only when you ask:
-a `+codex:large` or `+codex:hardest` prefix, or a tier set to it with
-`/mynameisjev:codex set`.
+Frontier models such as `gpt-6-astra` use Codex quota fastest. Jev selects
+them only when you ask with `+astra`, `+codex:astra`, `+codex:large`,
+`+codex:hardest`, a plain-language request such as "have Astra do it", or a
+tier set to one with `/mynameisjev:codex set`. `+astra` uses the current
+frontier model for the hardest tier, regardless of saved tier overrides.
+If Codex is unavailable, Jev reports that and keeps the work in Claude.
+If Codex's model list has no frontier model, Jev says so and the work runs
+on Codex's default model.
+An explicit "do it yourself" request keeps the work in the current session.
+
+Plain-language Fable and Astra requests are read by the Jev call, so unlike
+the prefixes they need `OPENROUTER_API_KEY` and sizing on for the project,
+and Jev acts on them only when it is at least 60% confident the message asks
+that model to do the work. Jev is asked to count only a request in your own
+words: not a name inside quoted or pasted text, not "don't use Fable", and
+not another thing with the same name (a story, the Fable compiler, Astra DB).
+That reading is a model's judgement and can be wrong; a prefix is exact. Only
+the first 4000 characters of a message are read. A short message that names
+Fable or Astra is still sent to Jev; slash commands never are.
 
 Models missing from your Codex account's list fall back to Codex's default,
 and so does an effort the chosen model does not support.
+Jev tells you when a `+codex:<size>` request falls back to the default model
+this way.
 
 ### Claude leads, Codex builds
 
@@ -595,8 +620,12 @@ The generated `AGENTS.md`:
   have its own variant (for example an `RTK.md` that tells Codex to prefix
   commands with `rtk`)
 - appends `~/.codex/AGENTS.local.md` for Codex-only rules
+- skips a `CLAUDE.md` import that points at `~/.codex/AGENTS.local.md`, the
+  generated `AGENTS.md`, or its backup, so none of them is included twice
 - appends the selected output-style skill, when set
 - is regenerated on your next prompt whenever the sources change
+- tells you once per session, with the reason, when it could not be
+  regenerated (not when Codex is simply not installed)
 
 ## Platform notes
 

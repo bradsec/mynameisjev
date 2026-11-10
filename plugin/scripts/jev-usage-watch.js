@@ -2,9 +2,10 @@
 // jev-usage-watch — PostToolUse hook. Claude's plan usage can climb past
 // every threshold inside one long turn, where the prompt hook (jev-router)
 // never runs. After each tool call this checks the usage the status line
-// last recorded and, once per threshold crossing (shared with the router's
-// notices), tells Claude to move remaining work to Codex or wrap up, tells
-// the user, and at the auto-transfer level copies the session into Codex.
+// last recorded and, once per threshold crossing in each session, tells
+// Claude to move remaining work to Codex or wrap up, tells the user (once
+// per crossing, shared with the router's notices), and at the auto-transfer
+// level copies the session into Codex.
 //
 // It also records hand-offs that actually ran (a Codex companion task, or a
 // mynameisjev:* subagent) as state.route, for the status line.
@@ -33,11 +34,8 @@ function peakPct() {
   }
 }
 
-// Helper agents and the Claude model each is pinned to (plugin/agents/*.md).
-const HELPER_MODELS = { 'mynameisjev:tiny': 'haiku', 'mynameisjev:everyday': 'sonnet', 'mynameisjev:large': 'opus', 'mynameisjev:hardest': 'opus' };
-
-// Subagent types that run on the session's model unless given one.
-const GENERAL_TYPES = new Set([undefined, null, '', 'general-purpose', 'claude']);
+// Helper agent -> the Claude model it is pinned to (plugin/agents/*.md).
+const HELPER_MODELS = Object.fromEntries(Object.values(st.TIER_INFO).map((info) => [info.agent, info.model]));
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
 
@@ -59,7 +57,7 @@ const shellCommand = (hookInput) => {
 function handOff(hookInput) {
   const input = hookInput.tool_input || {};
   const command = shellCommand(hookInput);
-  if (/codex-companion\.mjs"?\s+task\b/.test(command)) {
+  if (/codex-companion\.mjs"?\s+task(?=\s|$)/.test(command)) {
     // Flags sit before the heredoc; the brief after it may mention them.
     const line = command.split('<<')[0];
     const model = line.match(/--model\s+"?([\w.-]+)/);
@@ -69,7 +67,7 @@ function handOff(hookInput) {
     return { target: 'claude', model: HELPER_MODELS[input.subagent_type] };
   }
   // A general-purpose subagent on a helper model, as /mynameisjev:enforce sets.
-  if (hookInput.tool_name === 'Agent' && GENERAL_TYPES.has(input.subagent_type) && ['haiku', 'sonnet', 'opus'].includes(input.model)) {
+  if (hookInput.tool_name === 'Agent' && st.GENERAL_TYPES.has(input.subagent_type) && st.MODEL_FAMILIES.includes(input.model)) {
     return { target: 'claude', model: input.model };
   }
   return null;
@@ -151,9 +149,15 @@ async function watch(hookInput) {
 
   const auto = state.autoTransfer && codexNow.available && claude.pct >= TH.auto;
   const level = auto ? 'auto' : claude.pct >= TH.transfer ? 'transfer' : 'route';
-  const key = `${claude.window}:${claude.resetsAt}:${level}`;
-  if (state.limitNotice === key) return null;
+  const key = r.limitKey(claude, level);
+  // The user is told once per crossing (state.limitNotice, shared with the
+  // router's notices); Claude is told once per crossing in each session
+  // (limitNote, which the router also sets when it routes a prompt).
+  const session = hookInput.session_id;
+  const announced = state.limitNotice === key;
+  if (session ? state.sessions[session]?.limitNote === key : announced) return null;
   state.limitNotice = key;
+  if (session) st.putSessionSetting(state, session, 'limitNote', key);
   // Past a threshold mid-turn the rest of the turn is Codex steps, as the
   // router would have routed it; this also arms the edit guard.
   if (level !== 'auto' && codexNow.ok && companion) r.setRoute(state, 'codex', 'steps', 'suggested', hookInput.session_id);
@@ -194,7 +198,8 @@ async function watch(hookInput) {
     try { r.writeState(state); } catch (e) { /* the next Codex note is the full one again */ }
   }
   return {
-    systemMessage: notice,
+    // A transfer notice carries this session's own resume command.
+    ...(announced && level !== 'auto' ? {} : { systemMessage: notice }),
     hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context },
   };
 }

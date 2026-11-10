@@ -224,19 +224,95 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 // Maps (stats, costs, routes, ...) hold only numbers and objects.
 const isMap = (v) => isPlainObject(v) && Object.values(v).every((x) => typeof x === 'number' || isPlainObject(x));
 
+// Top-level keys whose numbers are running totals. Any other number (a time,
+// a rank, a recomputed total) is a value: adding two writers' differences to
+// it stores a number neither of them wrote.
+const COUNTERS = new Set(['stats', 'cost', 'costs', 'helperTokens', 'tiebreakTurn']);
+
+// Maps whose entries are records that several hooks add fields or counts to
+// (sessions[id], costs[feature], helperTokens[family]). An entry two hooks
+// both create is merged as additions to an empty one. Entries of other maps
+// (routes, codexTiers, clearCarry) are written whole, so the later one stands.
+const SHARED_RECORDS = new Set(['sessions', 'costs', 'helperTokens']);
+
+// A hand-off ledger task's identity (jev-handoff-ledger.js register): its
+// Codex job, else the transcript offset of its tool call. Null when it has
+// neither; such tasks are told apart by content only.
+const taskKey = (task) => (!isPlainObject(task) ? null : task.jobId ? `job:${task.jobId}` : Number.isFinite(task.start) ? `start:${task.start}` : null);
+
+// Three-way merge of one session's ledger tasks: tasks this process added are
+// appended to the disk's, tasks it removed are removed there, and a task it
+// changed is merged field by field. Overwriting the list would drop the tasks
+// another hook registered meanwhile.
+function mergeTasks(base, ours, disk, path) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const find = (list, task) => {
+    const key = taskKey(task);
+    return list.findIndex((t) => (key ? taskKey(t) === key : !taskKey(t) && same(t, task)));
+  };
+  const out = [...disk];
+  const baseLeft = [...base];
+  const added = [];
+  for (const task of ours) {
+    const b = find(baseLeft, task);
+    const before = b < 0 ? undefined : baseLeft.splice(b, 1)[0];
+    // A task with no identity that base lacks is new, even when the disk
+    // holds one with the same content: that one is another hook's.
+    const d = taskKey(task) ? find(out, task) : -1;
+    if (d >= 0) out[d] = merge(before, task, out[d], path);
+    // Not on disk: new here, or changed here while another hook dropped it.
+    else if (before === undefined || !same(before, task)) added.push(task);
+  }
+  // What is left of base is what this process removed.
+  for (const task of baseLeft) {
+    const d = find(out, task);
+    if (d >= 0) out.splice(d, 1);
+  }
+  return [...out, ...added];
+}
+
+// One session's tiebreak count, { turn, count } (jev-tiebreak.js). A count
+// belongs to its turn: this process's difference is added to the disk's only
+// when both are on the same turn, and it is measured from zero when the
+// state read held another turn or no entry. On different turns the later
+// write stands.
+function mergeTurn(base, ours, disk) {
+  if (!isPlainObject(disk) || disk.turn !== ours.turn || typeof disk.count !== 'number') return ours;
+  const from = isPlainObject(base) && base.turn === ours.turn && typeof base.count === 'number' ? base.count : 0;
+  return { ...disk, ...ours, count: disk.count + (ours.count - from) };
+}
+
 // Three-way merge of this process's changes (ours vs base, the state it read)
 // onto what is on disk now, which another hook may have written meanwhile.
 // Values this process left alone keep the disk's; changed counters add their
-// difference; maps merge per key; other changes overwrite.
-function merge(base, ours, disk, top = false) {
+// difference; maps merge per key; ledger tasks merge per task; other changes
+// overwrite. path is the keys from the state's root to the value.
+function merge(base, ours, disk, path = []) {
   if (JSON.stringify(ours) === JSON.stringify(base)) return disk;
-  if (typeof ours === 'number' && typeof base === 'number' && typeof disk === 'number') return disk + (ours - base);
-  if ((top || (isMap(ours) && isMap(disk)) || (isPlainObject(base) && isPlainObject(disk))) && isPlainObject(ours) && isPlainObject(base) && isPlainObject(disk)) {
+  if (typeof ours === 'number' && typeof disk === 'number') {
+    if (typeof base === 'number') return COUNTERS.has(path[0]) ? disk + (ours - base) : ours;
+    // A counter two hooks both started: each counted up from nothing.
+    if (base === undefined && COUNTERS.has(path[0])) return disk + ours;
+  }
+  if (path[0] === 'handoffLedger') {
+    if (path.length === 3 && path[2] === 'tasks' && Array.isArray(ours) && Array.isArray(disk)) return mergeTasks(Array.isArray(base) ? base : [], ours, disk, path);
+    // The ledger or a session in it that two hooks both created: merge them
+    // as additions to an empty one.
+    if (path.length <= 2 && base == null) base = {};
+  }
+  if (path.length === 2 && SHARED_RECORDS.has(path[0]) && base === undefined) base = {};
+  if (path[0] === 'tiebreakTurn') {
+    if (path.length === 2 && isPlainObject(ours) && typeof ours.count === 'number') return mergeTurn(base, ours, disk);
+    // No map yet in the state read: sessions that start one at the same
+    // time each add their entry.
+    if (path.length === 1 && base == null) base = {};
+  }
+  if ((path.length === 0 || (isMap(ours) && isMap(disk)) || (isPlainObject(base) && isPlainObject(disk))) && isPlainObject(ours) && isPlainObject(base) && isPlainObject(disk)) {
     const out = {};
     for (const k of new Set([...Object.keys(disk), ...Object.keys(ours)])) {
       // A key this process deleted stays deleted.
       if (!(k in ours) && k in base) continue;
-      const v = merge(base[k], ours[k], disk[k]);
+      const v = merge(base[k], ours[k], disk[k], [...path, k]);
       if (v !== undefined) out[k] = v;
     }
     return out;
@@ -278,7 +354,7 @@ function writeState(state) {
   try {
     let out = state;
     if (state[BASE] && fs.existsSync(file)) {
-      out = merge(state[BASE], clone(state), readStateFile(), true);
+      out = merge(state[BASE], clone(state), readStateFile());
       assignInPlace(state, out);
     }
     writeFileAtomic(file, JSON.stringify(out, null, 2));
@@ -380,6 +456,24 @@ function readProjectConfig(dir) {
   return { path: file, router: parsed.router !== false, prefer: parsed.prefer || null, error: null };
 }
 
+// Claude model families, cheapest first. The one list every hook reads: the
+// router ranks by this order, the usage watch and the subagent-stop hook
+// match model ids against it, and jev-agent-model.js takes its subset.
+const MODEL_FAMILIES = ['haiku', 'sonnet', 'opus', 'fable'];
+
+// Subagent types that run on the session's model unless given one.
+const GENERAL_TYPES = new Set([undefined, null, '', 'general-purpose', 'claude']);
+
+// Tier -> the plugin's pinned helper agent (agents/*.md, namespaced by the
+// plugin as mynameisjev:<name>), its model and its reasoning effort. Large
+// and hardest share a model and differ in effort.
+const TIER_INFO = {
+  tiny: { agent: 'mynameisjev:tiny', model: 'haiku', effort: 'low' },
+  everyday: { agent: 'mynameisjev:everyday', model: 'sonnet', effort: 'medium' },
+  large: { agent: 'mynameisjev:large', model: 'opus', effort: 'high' },
+  hardest: { agent: 'mynameisjev:hardest', model: 'opus', effort: 'xhigh' },
+};
+
 // Re-cache size from which the cold-cache guard blocks a message (router)
 // and the status line shows it armed.
 const COLD_GUARD_TOKENS = 100000;
@@ -402,4 +496,5 @@ module.exports = {
   PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, shareEffort, DEFAULT_STATE, readState, writeState,
   putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
+  MODEL_FAMILIES, GENERAL_TYPES, TIER_INFO,
 };

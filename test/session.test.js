@@ -5,6 +5,8 @@ const os = require('os');
 const path = require('path');
 
 process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-session-'));
+const claudeDir = process.env.CLAUDE_CONFIG_DIR;
+test.after(() => fs.rmSync(claudeDir, { recursive: true, force: true }));
 const st = require('../plugin/scripts/jev-state');
 const { handle, CARRY_MAX_AGE_MS } = require('../plugin/scripts/jev-session');
 

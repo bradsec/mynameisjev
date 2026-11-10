@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-substop-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude');
 const dataDir = path.join(tmp, 'claude', 'mynameisjev');
 fs.mkdirSync(dataDir, { recursive: true });

@@ -7,6 +7,7 @@ const { execFileSync } = require('child_process');
 
 const script = path.join(__dirname, '..', 'plugin', 'scripts', 'cc-statusline.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-statusline-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const claudeDir = path.join(tmp, 'claude');
 fs.mkdirSync(path.join(claudeDir, 'mynameisjev'), { recursive: true });
 

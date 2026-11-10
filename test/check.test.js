@@ -6,6 +6,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-check-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const claudeDir = path.join(tmp, 'claude');
 const dataDir = path.join(claudeDir, 'mynameisjev');
 fs.mkdirSync(dataDir, { recursive: true });

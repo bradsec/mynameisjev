@@ -42,8 +42,9 @@ test('skill file is Claude-only and runs the CLI with --auto', () => {
 });
 
 // The CLI as the skill runs it, fetch stubbed and counted.
-test('jev-cli decide --auto honours the gate; plain decide does not', () => {
+test('jev-cli decide --auto honours the gate; plain decide does not', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-tiebreak-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const dataDir = path.join(tmp, 'claude', 'mynameisjev');
   fs.mkdirSync(dataDir, { recursive: true });
   const statePath = path.join(dataDir, 'state.json');

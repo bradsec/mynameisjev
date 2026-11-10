@@ -206,9 +206,58 @@ function coldGuardArmed(state, session, pc) {
 // In wrap mode the user's previous status line command renders instead of
 // this one: it gets the same JSON on stdin and its output is printed as is,
 // followed by the JEV segment on its own line when statusLineJev is set.
-// Claude Code runs status line commands through a shell, so this does too.
-// Returns true when it handled the output.
+// Claude Code runs status line commands through a shell, so this does too,
+// and through the same one: a command written for one shell can fail under
+// another. Returns true when it handled the output.
 const WRAPPED_TIMEOUT_MS = 5000;
+
+// Every Windows shell below is started by absolute path. Windows looks for a
+// bare or relative executable name in the current directory before PATH, and
+// the status line runs in the project directory, so a file planted in a
+// project could otherwise run on every refresh.
+function absoluteFile(file) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) return false;
+  try { return fs.statSync(file).isFile(); } catch (_) { return false; }
+}
+
+// Full path of a program on PATH that can start without a shell, or null.
+// findOnPath skips relative and empty PATH entries; on Windows it can also
+// return a .cmd or .bat shim, which only a shell can start.
+function programOnPath(name) {
+  const file = require('./jev-exec').findOnPath(name);
+  return file && (process.platform !== 'win32' || /\.(exe|com)$/i.test(file)) ? file : null;
+}
+
+// Git Bash's bash.exe on Windows, or null. CLAUDE_CODE_GIT_BASH_PATH counts
+// only when it names an existing bash or sh, as in Claude Code. A bare
+// bash.exe on PATH is not trusted: System32 has one that starts WSL.
+function gitBash() {
+  const set = process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  if (set && /^(bash|sh)(\.exe)?$/i.test(path.basename(set)) && absoluteFile(set)) return set;
+  const candidates = [];
+  // git.exe sits in Git\cmd, Git\bin or Git\mingw64\bin.
+  const git = programOnPath('git');
+  if (git) candidates.push(path.join(path.dirname(git), '..', 'bin', 'bash.exe'), path.join(path.dirname(git), '..', '..', 'bin', 'bash.exe'));
+  for (const root of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')]) {
+    if (root) candidates.push(path.join(root, 'Git', 'bin', 'bash.exe'));
+  }
+  return candidates.find(absoluteFile) || null;
+}
+
+// How to start the wrapped command: { file, args, shell }, or null when
+// Windows has no shell to run it. On Windows Claude Code uses Git Bash when it
+// is installed and PowerShell otherwise (PowerShell 7 before 5.1), never
+// cmd.exe, which is what `shell: true` means there.
+function wrappedInvocation(command) {
+  if (process.platform !== 'win32') return { file: command, args: [], shell: true };
+  const bash = gitBash();
+  if (bash) return { file: bash, args: ['-c', command], shell: false };
+  const root = process.env.SystemRoot;
+  const powershell = programOnPath('pwsh') ||
+    [root && path.isAbsolute(root) ? root : 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'].join(path.sep);
+  if (!absoluteFile(powershell)) return null;
+  return { file: powershell, args: ['-NoProfile', '-NonInteractive', '-Command', command], shell: false };
+}
 
 function runWrapped(input, data, state) {
   if (!state) return false;
@@ -216,17 +265,20 @@ function runWrapped(input, data, state) {
   if (typeof command !== 'string' || !command.trim()) return false;
   // A wrapped command that is itself this status line would loop forever.
   if (process.env.JEV_STATUSLINE_WRAPPED) return false;
-  const r = spawnSync(command, {
+  const inv = wrappedInvocation(command);
+  const r = inv ? spawnSync(inv.file, inv.args, {
     input,
     env: { ...process.env, JEV_STATUSLINE_WRAPPED: '1' },
-    shell: true,
+    shell: inv.shell,
     encoding: 'utf8',
     timeout: WRAPPED_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 1024 * 1024,
-  });
-  let out = r.stdout ? r.stdout.replace(/\n+$/, '') : '';
-  if (!out && (r.error || r.status !== 0)) {
+  }) : null;
+  let out = r?.stdout ? r.stdout.replace(/\n+$/, '') : '';
+  if (!r) {
+    out = mutedGray('mynameisjev: no shell found to run your status line command (Git Bash or PowerShell)');
+  } else if (!out && (r.error || r.status !== 0)) {
     const why = r.error?.code === 'ETIMEDOUT' ? `timed out after ${WRAPPED_TIMEOUT_MS / 1000}s` : `exit ${r.status}`;
     out = mutedGray(`mynameisjev: your status line command failed (${why})`);
   }
@@ -357,16 +409,22 @@ function codexJobLine(job) {
 }
 
 // ── Git status ────────────────────────────────────────────────────────────────
-// Returns null when cwd is not inside a git repo (or git is not available).
+// Returns null when cwd is not inside a git repo (or git is not on PATH).
 // execFileSync with argument arrays: no shell involved, fixed arguments only.
+// git starts by full path: a bare name would let Windows pick up a git.exe
+// from the project directory.
+let gitProgram;
+
 // --no-optional-locks is a global git flag, so it goes before the subcommand.
 // Pass { skipRemote: true } to skip the remote-URL lookup when the caller
 // already has repo identity from the statusline payload.
 function getGitInfo(cwd, { skipRemote = false } = {}) {
+  if (gitProgram === undefined) gitProgram = programOnPath('git');
+  if (!gitProgram) return null;
   const opts = { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1000 };
 
   const run = args => {
-    try { return execFileSync('git', args, opts).trim(); } catch (_) { return null; }
+    try { return execFileSync(gitProgram, args, opts).trim(); } catch (_) { return null; }
   };
 
   // One call gives branch, upstream ahead/behind and the changed files; it

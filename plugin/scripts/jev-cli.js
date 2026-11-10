@@ -202,7 +202,11 @@ async function report(reportArgs = []) {
       console.log(`  ${f.padEnd(7)} ${String(t.runs).padStart(4)} runs   input ${fmt(t.input)}, cache write ${fmt(t.cacheWrite)}, cache read ${fmt(t.cacheRead)}, output ${fmt(t.output)}`);
     }
   }
-  const ledger = state.handoffLedger || {};
+  // A copy, settled here: two hooks that overlapped on one Codex thread leave shares that the
+  // ledger only corrects at Stop, and reading the report must not change the state.
+  const ledger = structuredClone(state.handoffLedger || {});
+  const threads = new Set(Object.values(ledger).flatMap((session) => (session.tasks || []).map((task) => task.threadId)));
+  for (const threadId of threads) require('./jev-handoff-ledger').settle(ledger, threadId);
   const sessions = reportArgs.includes('--session') ? (sessionId && ledger[sessionId] ? [ledger[sessionId]] : []) : Object.values(ledger);
   const tasks = sessions.flatMap((session) => session.tasks || []);
   const byModel = {};
@@ -532,8 +536,9 @@ async function statuslineCommand([arg, flag]) {
   const backupPath = path.join(st.claudeDir, 'statusline.jev-backup.json');
   const settings = readSettings(settingsPath);
   const launcher = st.dataFile('statusline.js');
-  // Windows runs status line commands through Git Bash or PowerShell; Git Bash
-  // strips unquoted backslashes, so give it a forward-slash absolute path.
+  // On Windows Claude Code runs status line commands through Git Bash when it
+  // is installed and through PowerShell otherwise. Git Bash strips unquoted
+  // backslashes, so give it a forward-slash absolute path.
   const home = os.homedir();
   const command = process.platform === 'win32'
     ? `node "${launcher.replace(/\\/g, '/')}"`

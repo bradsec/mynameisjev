@@ -1,5 +1,83 @@
 # Changelog
 
+## Unreleased
+
+- Route explicit `+fable` and plain-language Fable requests to a Fable
+  subagent, or handle them in the session when it already runs Fable.
+- Route explicit `+astra`, `+codex:astra`, and plain-language Astra requests
+  to Codex's current frontier model. A request to work in the session wins
+  over a plain-language model request.
+- Plain-language Fable and Astra requests now work in short messages such as
+  "have Astra do it", are ignored below 60% confidence so a mention like
+  "write a fable" does not start the most expensive route, keep the new-task
+  notice, and count as helper or Codex notes instead of `+` overrides.
+- Plain-language Fable and Astra requests are read strictly: a name in
+  quoted or pasted text, "don't use Fable", or another thing with the same
+  name is not meant to count as a request.
+- An Astra, `+codex:large` or other sized Codex request now tells you when
+  Codex's model list has no model for it and the work runs on Codex's default
+  model instead.
+- `+fable` on the first message of a session, before Jev knows the session's
+  model, now tells Claude to do the work itself if the session already runs
+  Fable instead of always starting a Fable subagent.
+- The report no longer counts a Codex thread's earlier turns again for each
+  `--resume-last` follow-up. Hand-offs recorded before this release keep
+  their old figures until they age out of the ledger.
+- Codex tokens in the report stay equal to the thread's total when two
+  hand-offs on one thread are recorded at the same time.
+- A background `--resume-last` task recorded before its turn used any tokens
+  now picks them up when its result is read.
+- Sessions with more than 100 hand-offs no longer move the tokens of dropped
+  tasks onto the next task on the same thread.
+- Claude's hand-off overhead is measured from the right place in transcripts
+  over 8 MB that contain non-ASCII text.
+- Hooks that run at the same time no longer drop each other's Codex hand-offs
+  from the report, and the update-check time is no longer pushed a day ahead.
+- When two hooks start tracking the same session or record the first cost of
+  a feature at the same time, both changes are now kept, so the full Codex
+  brief or mid-turn note is no longer repeated and the report no longer
+  misses a call.
+- The tiebreak limit of two calls per turn now holds per session: a prompt in
+  another session no longer grants more calls.
+- With sync on, Jev now says once per session when it could not regenerate
+  `~/.codex/AGENTS.md`, and why.
+- Fable subagent runs now count as Claude helper runs in the report.
+- The `/codex:rescue` resume probe is no longer counted as a Codex run.
+- With several sessions open, each one now gets the mid-turn hand-off note
+  when Claude usage crosses a threshold; the user notice still shows once.
+- A session copied into Codex at prompt time is no longer copied again on its
+  first tool call.
+- A prompt that starts with pasted markup such as `<div ...>` is no longer
+  mistaken for a Claude Code system message, so the completeness check covers
+  that turn and the compaction digest keeps the request.
+- Sync no longer copies the generated `AGENTS.md` into itself when an
+  import's file name differs from `AGENTS.md` only by letter case on a
+  case-insensitive disk (macOS and Windows defaults), which grew the file on
+  every prompt.
+- Sync no longer reads the generated `AGENTS.md` or its backup back in when
+  `CLAUDE.md` imports that file, directly or through a link, which grew the
+  file on every prompt.
+- Sync no longer includes `~/.codex/AGENTS.local.md` twice when an import in
+  `CLAUDE.md` has the same file name.
+- Sync no longer includes `~/.codex/AGENTS.local.md` twice when `CLAUDE.md`
+  imports that file: the import is skipped and the rules appear once, at the
+  end.
+- Sync no longer appends the generated `AGENTS.md` or its backup to itself
+  when `~/.codex/AGENTS.local.md` is a link to one of them.
+- Sync now skips with a clear reason when `~/.claude/CLAUDE.md` is a link to
+  the generated `AGENTS.md` or its backup, where it used to rewrite the file
+  from its own output on every prompt.
+- `/mynameisjev:statusline wrap` on Windows now runs your status line command
+  through Git Bash, or PowerShell when Git Bash is not installed, as Claude
+  Code does. It used `cmd.exe` before, so a command that worked unwrapped
+  could fail once wrapped.
+- On Windows, Jev no longer starts programs from the current directory: git,
+  PowerShell, Git Bash and the Codex, Claude and RTK CLIs are started by full
+  path from absolute PATH entries only, so a file planted in a project (for
+  example `git.exe` or `powershell.exe`) cannot run in their place. On every
+  platform git is started by full path, and a CLI that is only reachable
+  through a relative PATH entry such as `.` now counts as not installed.
+
 ## 0.3.28
 
 - Record the Codex job and token use for foreground Codex hand-offs. The

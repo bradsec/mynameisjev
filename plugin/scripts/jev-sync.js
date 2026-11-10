@@ -82,7 +82,9 @@ function fallbackConfig() {
 
 function projectInstructions(cwd = process.cwd()) {
   let root = cwd;
-  try { root = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch (_) {}
+  // git by full path: a bare name can resolve to a file in the project.
+  const git = exec.findOnPath('git');
+  try { if (git) root = execFileSync(git, ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch (_) {}
   const claudeFile = path.join(root, 'CLAUDE.md');
   const hasClaude = fs.existsSync(claudeFile);
   const hasAgents = ['AGENTS.override.md', 'AGENTS.md'].some((name) => fs.existsSync(path.join(root, name)));
@@ -110,15 +112,37 @@ function resolveImport(ref) {
   return path.isAbsolute(ref) ? ref : path.join(claudeDir, ref);
 }
 
+// True when both paths name one file. File identity, not spelling, decides:
+// a case-insensitive volume opens AGENTS.md under any casing of its name,
+// while a case-sensitive one keeps agents.md as a separate file.
+function sameFile(a, b) {
+  if (a === b) return true;
+  try {
+    const sa = fs.statSync(a, { bigint: true });
+    const sb = fs.statSync(b, { bigint: true });
+    return sa.dev === sb.dev && sa.ino === sb.ino;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Sync writes AGENTS.md and its backup, so neither is ever a source, under
+// any name.
+const generated = (file) => sameFile(file, agentsPath) || sameFile(file, backupPath);
+
 // Contents for an `@ref` import line: the Codex variant if one exists, else
-// Claude's file. Returns { text, from } or null when neither exists.
+// Claude's file. Returns { text, from }, null when neither exists, or
+// { local: true, empty } for AGENTS.local.md, which buildAgents adds at the
+// end unless it is blank.
 function importContent(ref) {
   const claudeFile = resolveImport(ref);
   const codexFile = path.join(codexHome, path.basename(claudeFile));
-  const codexText = codexFile === agentsPath || codexFile === backupPath ? null : readText(codexFile);
+  // AGENTS.local.md is appended by buildAgents, not a variant of an import.
+  const codexText = generated(codexFile) || sameFile(codexFile, localPath) ? null : readText(codexFile);
   if (codexText !== null) return { text: codexText.trim(), from: codexFile };
-  const claudeText = readText(claudeFile);
+  const claudeText = generated(claudeFile) ? null : readText(claudeFile);
   if (claudeText === null) return null;
+  if (sameFile(claudeFile, localPath)) return { local: true, empty: !claudeText.trim() };
   // Claude's RTK rules assume the Claude hook rewrites commands; Codex has
   // no such hook, so it needs the prefix rule spelled out.
   const text = path.basename(claudeFile) === 'RTK.md' ? `${RTK_PREFIX_RULE}\n\n${claudeText.trim()}` : claudeText.trim();
@@ -128,9 +152,9 @@ function importContent(ref) {
 const tilde = (p) => p.replace(os.homedir(), '~');
 
 // The AGENTS.md text generated from the current sources, or null when
-// CLAUDE.md is missing.
+// CLAUDE.md is missing or is itself the generated file.
 function buildAgents({ style = null } = {}) {
-  const claudeMd = readText(claudeMdPath);
+  const claudeMd = generated(claudeMdPath) ? null : readText(claudeMdPath);
   if (claudeMd === null) return null;
 
   const body = claudeMd
@@ -142,21 +166,23 @@ function buildAgents({ style = null } = {}) {
       if (!m) return line;
       const inc = importContent(m[1]);
       if (!inc) return `<!-- jev-include: ${m[1]} not found -->`;
+      if (inc.local) return `<!-- jev-include: ${m[1]} is AGENTS.local.md, ${inc.empty ? 'which is empty' : 'appended below'} -->`;
       return `<!-- jev-include: ${path.basename(m[1])} (from ${tilde(inc.from)}) -->\n${inc.text}\n<!-- jev-include-end -->`;
     })
     .join('\n')
     .trim();
 
   const parts = [HEADER, body, 'If a command fails on sandbox, permission, or network denial (EROFS, EACCES, EPERM, read-only file system, operation not permitted, network unreachable), do not retry or work around it; report it as blocked and continue.'];
-  const local = readText(localPath);
+  const local = generated(localPath) ? null : readText(localPath);
   if (local && local.trim()) parts.push(`<!-- jev-include: AGENTS.local.md -->\n${local.trim()}\n<!-- jev-include-end -->`);
   if (style) parts.push(skills.codexBlock(style));
   return `${parts.join('\n\n')}\n`;
 }
 
-// 'in-sync' | 'out-of-sync' | 'no-codex' | 'no-claude-md'
+// 'in-sync' | 'out-of-sync' | 'no-codex' | 'no-claude-md' | 'claude-md-is-generated'
 function agentsStatus(opts) {
   if (!fs.existsSync(codexHome)) return 'no-codex';
+  if (generated(claudeMdPath)) return 'claude-md-is-generated';
   const expected = buildAgents(opts);
   if (expected === null) return 'no-claude-md';
   return readText(agentsPath) === expected ? 'in-sync' : 'out-of-sync';
@@ -166,6 +192,7 @@ function agentsStatus(opts) {
 // 'unchanged', or a skip reason.
 function syncAgents(opts) {
   if (!fs.existsSync(codexHome)) return 'skipped: Codex not installed';
+  if (generated(claudeMdPath)) return 'skipped: CLAUDE.md is the generated AGENTS.md or its backup';
   const expected = buildAgents(opts);
   if (expected === null) return 'skipped: no CLAUDE.md';
   const current = readText(agentsPath);

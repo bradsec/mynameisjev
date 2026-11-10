@@ -6,6 +6,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-codex-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude');
 process.env.CODEX_HOME = path.join(tmp, 'codex');
 

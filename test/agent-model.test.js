@@ -28,6 +28,8 @@ test('leaves the call alone otherwise', () => {
   assert.strictEqual(enforce(call(), state({ enforce: false }), now), null, 'off');
   assert.strictEqual(enforce(call(), state({ enabled: false }), now), null, 'router off');
   assert.strictEqual(enforce(call({ model: 'opus' }), state(), now), null, 'Claude chose a model');
+  assert.strictEqual(enforce(call({ model: 'fable' }), state(), now), null, 'explicit Fable stays');
+  assert.strictEqual(enforce(call(), state({ route: route({ model: 'fable' }) }), now), null, 'never injects Fable');
   assert.strictEqual(enforce(call({ subagent_type: 'Explore' }), state(), now), null, 'named agent');
   assert.strictEqual(enforce(call({ subagent_type: 'mynameisjev:tiny' }), state(), now), null, 'pinned helper');
   assert.strictEqual(enforce(call(), state({ route: route({ target: 'codex', model: 'gpt-6-sol' }) }), now), null, 'Codex route');

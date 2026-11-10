@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-sync-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const claudeDir = path.join(tmp, 'claude');
 const codexHome = path.join(tmp, 'codex');
 process.env.CLAUDE_CONFIG_DIR = claudeDir;

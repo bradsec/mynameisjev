@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-stopfail-'));
+test.after(() => fs.rmSync(home, { recursive: true, force: true }));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 const claudeDir = path.join(home, '.claude');

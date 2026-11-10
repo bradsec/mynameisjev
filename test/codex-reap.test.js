@@ -45,8 +45,12 @@ function writeProc(root, p) {
 
 const setClients = (root, procs, clients) => fs.writeFileSync(path.join(root, 'net', 'unix'), netUnix(procs, clients));
 
+const procRoots = [];
+test.after(() => { for (const root of procRoots) fs.rmSync(root, { recursive: true, force: true }); });
+
 function fakeProc(procs) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-reap-'));
+  procRoots.push(root);
   for (const p of procs) writeProc(root, p);
   fs.mkdirSync(path.join(root, 'net'));
   setClients(root, procs, {});

@@ -6,6 +6,7 @@ const path = require('path');
 
 // Point every path at a throwaway config before loading the scripts.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-router-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude');
 process.env.CODEX_HOME = path.join(tmp, 'codex');
 // Codex routing needs the codex plugin's companion script to exist.
@@ -223,17 +224,21 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
 
 test('codex notes: full guidance once per session, then a short pointer', () => {
   const note = (over) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true, ...over })).note;
+  // Length without the companion's location, which is this run's temp dir:
+  // the bound is on the note's own text, not on how long os.tmpdir() is.
+  const size = (text) => text.split(tmp).join('').split(tmp.replace(/\\/g, '/')).join('').length;
   const short = note({ guided: true });
   assert.match(short, /Same Codex rules as earlier this session/);
   assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
   assert.match(short, /--model .*--effort/);
   assert.match(short, /--write/);
   assert.doesNotMatch(short, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|Notes for the lead|explicitly asks you/);
-  assert.ok(short.length < 700);
+  assert.match(short, /codex-companion\.mjs/);
+  assert.ok(size(short) < 680, `short note is ${size(short)} characters`);
   const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
   assert.match(steps, /Same Codex rules as earlier this session/);
   assert.doesNotMatch(steps, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|exception is small fixes/);
-  assert.ok(steps.length < 700);
+  assert.ok(size(steps) < 680, `steps note is ${size(steps)} characters`);
 });
 
 test('first full Codex note names project instructions, later note stays short', () => {
@@ -267,6 +272,9 @@ test('override: parses "+" prefixes, not look-alikes', () => {
   assert.deepStrictEqual(router.parseOverride('+codex fix it'), { target: 'codex', tier: 'everyday', token: '+codex' });
   assert.deepStrictEqual(router.parseOverride('+CODEX:hardest redesign'), { target: 'codex', tier: 'hardest', token: '+CODEX:hardest' });
   assert.deepStrictEqual(router.parseOverride('+claude'), { target: 'claude', tier: null, token: '+claude' });
+  assert.deepStrictEqual(router.parseOverride('+fable write it'), { target: 'fable', tier: null, token: '+fable' });
+  assert.deepStrictEqual(router.parseOverride('+astra fix it'), { target: 'codex', tier: 'astra', token: '+astra' });
+  assert.deepStrictEqual(router.parseOverride('+codex:astra fix it'), { target: 'codex', tier: 'astra', token: '+codex:astra' });
   assert.strictEqual(router.parseOverride('+larger plan'), null);
   assert.strictEqual(router.parseOverride('!codex fix it'), null);
   assert.strictEqual(router.parseOverride('use +codex here'), null);
@@ -297,6 +305,72 @@ test('override: codex falls back to Claude when unavailable', () => {
   assert.match(r.note, /Codex is not available, so handle it here/);
   assert.match(r.notice, /"\+codex" ignored/);
   assert.strictEqual(r.route[0], 'claude');
+});
+
+test('explicit Fable uses a general-purpose Agent or the Fable session', () => {
+  const o = router.parseOverride('+fable write it');
+  const r = router.overrideAdvice(o, ctx());
+  assert.match(r.note, /Agent tool.*general-purpose.*model: "fable".*self-contained prompt/);
+  assert.deepStrictEqual(r.route, ['claude', 'fable', 'suggested']);
+  const here = router.overrideAdvice(o, ctx({ sessionFamily: 'fable' }));
+  assert.match(here.note, /Handle this message here/);
+  assert.deepStrictEqual(here.route, ['claude', 'fable', 'session']);
+});
+
+test('explicit Astra uses the frontier tier even with a saved hardest override', () => {
+  for (const prefix of ['+astra', '+codex:astra']) {
+    const r = router.overrideAdvice(router.parseOverride(`${prefix} fix it`), ctx({ codexNow: codexOk, overrides: { hardest: { model: 'gpt-6.1-sol' } } }));
+    assert.match(r.note, /task --model gpt-6-astra --effort high/);
+    assert.deepStrictEqual(r.route, ['codex', 'gpt-6-astra', 'suggested']);
+  }
+  assert.match(router.overrideAdvice(router.parseOverride('+astra fix it'), ctx()).notice, /Codex is not available/);
+});
+
+test('explicit Astra with no frontier model in the Codex list says so and does not claim the model', () => {
+  const codexCache = { models: [
+    { id: 'gpt-6.1-sol', description: 'Latest workhorse model.', isDefault: true },
+    { id: 'gpt-6-luna', description: 'Fast and affordable model.' },
+  ] };
+  for (const o of [router.parseOverride('+astra fix it'), router.parseOverride('+codex:astra fix it'), { target: 'codex', tier: 'astra', token: null }]) {
+    const r = router.overrideAdvice(o, ctx({ codexNow: codexOk, codexCache }));
+    assert.deepStrictEqual(r.route, ['codex', 'default', 'suggested']);
+    assert.match(r.notice, /no frontier model.*Codex's default model/);
+    assert.match(r.note, /no frontier model.*Codex's default model/);
+    assert.doesNotMatch(r.note, /requested this model/);
+    assert.doesNotMatch(r.note, /--model/);
+  }
+  const busy = router.overrideAdvice(router.parseOverride('+astra fix it'), ctx({ codexNow: codexBusy, codexCache }));
+  assert.match(busy.notice, /no frontier model/);
+  assert.match(busy.notice, /near its limit/);
+});
+
+test('+codex:<size> whose model is not in the Codex list says it runs on the default model', () => {
+  const codexCache = { models: [
+    { id: 'gpt-6.1-sol', description: 'Latest workhorse model.', isDefault: true },
+    { id: 'gpt-6-luna', description: 'Fast and affordable model.' },
+  ] };
+  for (const size of ['large', 'hardest']) {
+    const r = router.overrideAdvice(router.parseOverride(`+codex:${size} fix it`), ctx({ codexNow: codexOk, codexCache }));
+    assert.deepStrictEqual(r.route, ['codex', 'default', 'suggested']);
+    assert.match(r.notice, new RegExp(`"\\+codex:${size}".*no model for the ${size} size.*Codex's default model`));
+    assert.match(r.note, /Codex's default model/);
+    assert.doesNotMatch(r.note, /--model/);
+  }
+  // Sizes whose model is listed, and everyday (Codex's default anyway), stay quiet.
+  for (const prefix of ['+codex:tiny', '+codex']) {
+    assert.strictEqual(router.overrideAdvice(router.parseOverride(`${prefix} fix it`), ctx({ codexNow: codexOk, codexCache })).notice, null);
+  }
+  const noDefault = { models: [{ id: 'gpt-6-luna', description: 'Fast and affordable model.' }] };
+  assert.strictEqual(router.overrideAdvice(router.parseOverride('+codex fix it'), ctx({ codexNow: codexOk, codexCache: noDefault })).notice, null);
+});
+
+test('explicit Fable with the session model not yet known leaves the choice to Claude', () => {
+  for (const o of [router.parseOverride('+fable write it'), { target: 'fable', tier: null, token: null }]) {
+    const r = router.overrideAdvice(o, ctx({ sessionFamily: null }));
+    assert.match(r.note, /If this session already runs Fable, handle this message here/);
+    assert.match(r.note, /Otherwise delegate it without asking with the Agent tool.*general-purpose.*model: "fable"/);
+  }
+  assert.doesNotMatch(router.overrideAdvice(router.parseOverride('+fable write it'), ctx()).note, /If this session/);
 });
 
 test('model streak: suggests a cheaper session model after 5 smaller messages', () => {

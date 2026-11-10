@@ -6,6 +6,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-costs-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const claudeDir = path.join(tmp, 'claude');
 const dataDir = path.join(claudeDir, 'mynameisjev');
 fs.mkdirSync(dataDir, { recursive: true });

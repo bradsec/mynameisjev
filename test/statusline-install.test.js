@@ -8,6 +8,7 @@ const { execFileSync } = require('child_process');
 
 const cli = path.join(__dirname, '..', 'plugin', 'scripts', 'jev-cli.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-sl-install-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const claudeDir = path.join(tmp, 'claude');
 const project = path.join(tmp, 'project');
 const settingsPath = path.join(claudeDir, 'settings.json');

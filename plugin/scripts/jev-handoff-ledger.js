@@ -75,6 +75,42 @@ function codexUsage(threadId) {
   return null;
 }
 
+const USAGE_KEYS = ['input', 'cacheRead', 'output', 'reasoningOutput'];
+
+// Codex reports a thread's running total, and --resume-last adds a task to the same thread.
+// Each task keeps the total it read (codexTotal); its own share (codex) is that total less the
+// total of the task read before it. Two hooks that register from the same stale state cannot
+// see each other's task, so the shares are worked out again on every ledger write.
+function settle(ledger, threadId) {
+  if (!threadId) return;
+  const tasks = Object.values(ledger).flatMap((session) => session.tasks || []).filter((task) => task.threadId === threadId);
+  const size = (task) => USAGE_KEYS.reduce((sum, key) => sum + task.codexTotal[key], 0);
+  const read = tasks.filter((task) => task.codexTotal).sort((a, b) => size(a) - size(b));
+  read.forEach((task, i) => {
+    // The first task keeps its share: the tasks before it may have been trimmed from the ledger.
+    if (i === 0 && task.codex) return;
+    // Tasks stored without a total (0.3.28 and earlier) each hold the thread's running total as
+    // their share, so the first task read since starts from the largest of them.
+    const earlier = i ? [read[i - 1].codexTotal] : tasks.filter((other) => !other.codexTotal && other.codex).map((other) => other.codex);
+    task.codex = { ...task.codexTotal };
+    for (const key of USAGE_KEYS) task.codex[key] = Math.max(0, task.codex[key] - Math.max(0, ...earlier.map((before) => before[key])));
+  });
+}
+
+// A task registered while its turn is still running reads the thread too early, so register
+// reads it again when the result returns; the share grows by what the thread gained since.
+function readUsage(ledger, task) {
+  if (task.codex && !task.codexTotal) return;
+  const total = codexUsage(task.threadId);
+  if (!total) return;
+  if (task.codex) {
+    for (const key of USAGE_KEYS) task.codex[key] += Math.max(0, total[key] - task.codexTotal[key]);
+    task.codex.model = total.model;
+  }
+  task.codexTotal = total;
+  settle(ledger, task.threadId);
+}
+
 function matchingJob(sessionId, jobId, threadId, window, claimed) {
   if (!sessionId) return null;
   const matches = [];
@@ -101,11 +137,15 @@ function matchingJob(sessionId, jobId, threadId, window, claimed) {
 
 function toolWindow(data, toolUseId) {
   if (!toolUseId) return null;
-  let offset = data.start;
   let from = null;
-  for (const line of data.text.split('\n')) {
+  // Offsets come from the bytes, not the decoded text: a tail that starts inside a multibyte
+  // character decodes to replacement characters of a different length.
+  for (let at = 0, next; at <= data.buf.length; at = next + 1) {
+    next = data.buf.indexOf(10, at);
+    if (next < 0) next = data.buf.length;
+    const offset = data.start + at;
     try {
-      const entry = JSON.parse(line);
+      const entry = JSON.parse(data.buf.toString('utf8', at, next));
       const content = entry.message?.content;
       if (Array.isArray(content)) {
         if (entry.type === 'assistant' && content.some((part) => part.type === 'tool_use' && part.id === toolUseId)) {
@@ -117,7 +157,6 @@ function toolWindow(data, toolUseId) {
         }
       }
     } catch (_) {}
-    offset += Buffer.byteLength(line) + 1;
   }
   return from && { start: from.offset, from: from.at, to: NaN };
 }
@@ -144,12 +183,14 @@ function register(state, hookInput, jobId, returned = true) {
   if (existing) {
     existing.returned = returned || existing.returned;
     existing.threadId = existing.threadId || (UUID.test(job.threadId || '') ? job.threadId : null);
-    existing.codex = existing.codex || codexUsage(existing.threadId);
+    if (!existing.done) readUsage(ledger, existing);
     return;
   }
   const start = window?.start ?? null;
   const threadId = UUID.test(job?.threadId || '') ? job.threadId : null;
-  session.tasks.push({ jobId: job?.id || null, threadId, codex: codexUsage(threadId), start, claude: null, returned, done: false });
+  const task = { jobId: job?.id || null, threadId, codex: null, start, claude: null, returned, done: false };
+  session.tasks.push(task);
+  readUsage(ledger, task);
   if (session.tasks.length > 100) session.tasks.splice(0, session.tasks.length - 100);
   session.at = Date.now();
   for (const id of Object.keys(ledger).sort((a, b) => ledger[b].at - ledger[a].at).slice(KEEP_SESSIONS)) delete ledger[id];
@@ -164,11 +205,12 @@ function finish(state, hookInput) {
   for (const task of session.tasks) {
     if (!task.returned || task.done) continue;
     const end = starts.find((start) => start > task.start) ?? data.size;
-    task.codex = task.codex || codexUsage(task.threadId);
+    if (!task.codex) readUsage(state.handoffLedger, task);
     task.claude = task.start !== null && task.start >= data.start && end <= data.size
       ? claudeUsage(data.buf.subarray(task.start - data.start, end - data.start).toString('utf8')) : null;
     task.done = true;
   }
+  for (const threadId of new Set(session.tasks.map((task) => task.threadId))) settle(state.handoffLedger, threadId);
   const models = {};
   let claude = 0;
   let measured = 0;
@@ -187,7 +229,7 @@ function finish(state, hookInput) {
   session.totals = { models, claude, measured, unknown };
 }
 
-module.exports = { codexUsage, claudeUsage, register, finish };
+module.exports = { codexUsage, claudeUsage, register, finish, settle };
 
 if (require.main === module) {
   let input = '';

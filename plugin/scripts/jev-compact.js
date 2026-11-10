@@ -54,8 +54,9 @@ function userText(entry) {
     text = content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
   }
   if (!text || !text.trim()) return null;
-  // Harness messages (commands, task notifications, reminders) open with a tag.
-  if (/^\s*<[a-z][a-z-]*[\s>]/.test(text)) return null;
+  // Harness messages (commands, shell runs, task notifications, reminders) open
+  // with one of these tags. Any other leading tag is pasted markup the user typed.
+  if (/^\s*<(?:command-[a-z-]+|local-command-[a-z-]+|bash-[a-z-]+|task-notification|system-reminder)[\s>]/.test(text)) return null;
   return text.trim();
 }
 

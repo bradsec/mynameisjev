@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-state-'));
+test.after(() => fs.rmSync(claudeDir, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = claudeDir;
 const st = require('../plugin/scripts/jev-state');
 const statePath = path.join(st.dataDir, 'state.json');

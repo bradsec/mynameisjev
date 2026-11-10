@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const cmp = require('../plugin/scripts/jev-compare');
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'jev-compare-')));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const root = path.join(tmp, 'project');
 fs.mkdirSync(path.join(root, 'src'), { recursive: true });
 const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} line ${i + 1}`).join('\n');

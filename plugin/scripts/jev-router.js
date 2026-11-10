@@ -41,6 +41,7 @@ const updates = require('./jev-updates');
 const { redact } = require('./jev-redact');
 const { askJev } = require('./jev-api');
 const jevPace = require('./jev-pace');
+const tiebreak = require('./jev-tiebreak');
 
 // Written by the jev-model-switch PostModelSwitch hook.
 const modelsPath = path.join(st.dataDir, 'session-models.json');
@@ -101,21 +102,14 @@ function recordSilent(state, counter, reason) {
   writeState(state);
 }
 
-// Tier -> the plugin's pinned helper agent (agents/*.md, namespaced by the
-// plugin as mynameisjev:<name>), its model and its reasoning effort. Large
-// and hardest share a model and differ in effort.
-const TIER_INFO = {
-  tiny: { agent: 'mynameisjev:tiny', model: 'haiku', effort: 'low' },
-  everyday: { agent: 'mynameisjev:everyday', model: 'sonnet', effort: 'medium' },
-  large: { agent: 'mynameisjev:large', model: 'opus', effort: 'high' },
-  hardest: { agent: 'mynameisjev:hardest', model: 'opus', effort: 'xhigh' },
-};
+// Tier -> pinned helper agent, model and effort (defined in jev-state.js).
+const TIER_INFO = st.TIER_INFO;
 
 // "opus, high effort" or "haiku".
 const helperLabel = (info) => `${info.model}${info.effort ? `, ${info.effort} effort` : ''}`;
 
-// Cost/capability order of model families.
-const MODEL_RANK = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
+// Cost/capability order of model families: 1 for the cheapest.
+const MODEL_RANK = Object.fromEntries(st.MODEL_FAMILIES.map((family, i) => [family, i + 1]));
 
 function modelFamily(model) {
   if (typeof model !== 'string') return null;
@@ -449,6 +443,12 @@ function modelChangeNotice(before, cache) {
   };
 }
 
+// Identifies one usage crossing: window, reset and level ('route',
+// 'transfer' or 'auto'). state.limitNotice and sessions[id].limitNote hold
+// it, written here and by the usage watch (jev-usage-watch.js), so every
+// writer builds it with this one function.
+const limitKey = (claude, level) => `${claude.window}:${claude.resetsAt}:${level}`;
+
 // User notice once Claude usage crosses a threshold, or null below it. The
 // key identifies window, reset and level so each crossing is announced once.
 function limitNoticeFor(claude, codexNow, autoTransferOn) {
@@ -467,7 +467,7 @@ function limitNoticeFor(claude, codexNow, autoTransferOn) {
   } else if (codexNow.available) {
     text = codexNow.ok ? `${head} Routing self-contained work to Codex until the reset.` : `${head} Codex can't take work, so it stays on Claude.`;
   }
-  return { key: `${claude.window}:${claude.resetsAt}:${level}`, text };
+  return { key: limitKey(claude, level), text };
 }
 
 // Copy the session into a new Codex thread with the plugin's transfer command
@@ -605,14 +605,16 @@ function codexCall(choice, companion, { review, guided, codexLimits, cwd } = {})
 
 // A routing override at the start of a message: "+large fix the parser".
 // Not "!": a leading "!" puts Claude Code's prompt into bash mode. Returns
-// { target: 'tier' | 'codex' | 'claude', tier, token } or null.
-const OVERRIDE = /^\+(tiny|everyday|large|hardest|claude|codex(?::(tiny|everyday|large|hardest))?)(?=\s|$)/i;
+// { target: 'tier' | 'codex' | 'claude' | 'fable', tier, token } or null.
+const OVERRIDE = /^\+(tiny|everyday|large|hardest|claude|fable|astra|codex(?::(tiny|everyday|large|hardest|astra))?)(?=\s|$)/i;
 
 function parseOverride(prompt) {
   const m = OVERRIDE.exec(prompt.trim());
   if (!m) return null;
   const word = m[1].toLowerCase();
   if (word === 'claude') return { target: 'claude', tier: null, token: m[0] };
+  if (word === 'fable') return { target: 'fable', tier: null, token: m[0] };
+  if (word === 'astra') return { target: 'codex', tier: 'astra', token: m[0] };
   if (word.startsWith('codex')) return { target: 'codex', tier: (m[2] || 'everyday').toLowerCase(), token: m[0] };
   return { target: 'tier', tier: word, token: m[0] };
 }
@@ -621,9 +623,21 @@ function parseOverride(prompt) {
 // effort?, notice? } (route and effort as in setRoute); notice goes to the user when Codex was
 // asked for but may not run.
 function overrideAdvice(o, ctx) {
-  const prefix = `The "${o.token}" prefix on this message is a Jev routing override from the user, not part of the task. `;
+  const prefix = o.token
+    ? `The "${o.token}" prefix on this message is a Jev routing override from the user, not part of the task. `
+    : 'The user explicitly requested this model for the work. ';
   if (o.target === 'claude') {
     return { note: `${prefix}Handle this message here in this session, without delegating it.`, route: ['claude', ctx.sessionFamily, 'session'] };
+  }
+  if (o.target === 'fable') {
+    if (ctx.sessionFamily === 'fable') return { note: `${prefix}Handle this message here in this Fable session.`, route: ['claude', 'fable', 'session'] };
+    // No assistant turn or /model switch yet, so the session may already be
+    // Fable. Claude knows its own model; the hook does not.
+    const unknown = !ctx.sessionFamily;
+    return {
+      note: `${prefix}${unknown ? 'If this session already runs Fable, handle this message here. Otherwise delegate' : 'Delegate'} it without asking with the Agent tool, subagent_type: "general-purpose", model: "fable", and a self-contained prompt that carries any context it needs from this conversation.`,
+      route: ['claude', 'fable', 'suggested'],
+    };
   }
   if (o.target === 'tier') {
     const info = TIER_INFO[o.tier];
@@ -639,16 +653,28 @@ function overrideAdvice(o, ctx) {
     return {
       note: `${prefix}The user asked for Codex, but Codex is not available, so handle it here.`,
       route: ['claude', ctx.sessionFamily, 'session'],
-      notice: 'Jev: "+codex" ignored: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH).',
+      notice: `Jev: ${o.token ? `"${o.token.trim()}"` : 'Astra request'} ignored: Codex is not available (needs the codex plugin enabled and the codex CLI on PATH).`,
     };
   }
-  const choice = codex.tierChoice(o.tier, ctx.overrides, ctx.codexCache, true);
+  const choice = codex.tierChoice(o.tier === 'astra' ? 'hardest' : o.tier, o.tier === 'astra' ? {} : ctx.overrides, ctx.codexCache, true);
+  // tierChoice drops a model Codex does not list. The user and Claude are
+  // told, so neither assumes the asked-for model ran. Everyday is Codex's
+  // default by definition, so it needs no notice.
+  const what = choice.model || o.tier === 'everyday' ? null
+    : o.tier === 'astra' ? 'no frontier model' : `no model for the ${o.tier} size`;
+  const asked = o.token ? `"${o.token.trim()}"` : 'Astra request';
+  const lead = what
+    ? `${o.token ? prefix : ''}The user asked for ${o.tier === 'astra' ? 'Astra' : `Codex's ${o.tier} model`}, but Codex's model list has ${what}, so this runs on Codex's default model. `
+    : prefix;
   return {
-    note: `${prefix}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits, cwd: ctx.cwd })}`,
+    note: `${lead}Route it to Codex ${codexCall(choice, companion, { review: ctx.review, guided: ctx.guided, codexLimits: ctx.codexLimits, cwd: ctx.cwd })}`,
     route: ['codex', choice.model || 'default', 'suggested'],
-    // Asked for explicitly, so it goes even when usage looks high; the user
-    // hears why it may fail.
-    notice: ctx.codexNow.ok ? null : `Jev: sending to Codex as asked, but ${ctx.codexNow.text}.`,
+    notice: [
+      what ? `Jev: ${asked}${o.tier === 'astra' ? ' cannot use Astra' : ''}: Codex's model list has ${what}, so it runs on Codex's default model.` : null,
+      // Asked for explicitly, so it goes even when usage looks high; the user
+      // hears why it may fail.
+      ctx.codexNow.ok ? null : `Jev: sending to Codex as asked, but ${ctx.codexNow.text}.`,
+    ].filter(Boolean).join('\n') || null,
   };
 }
 
@@ -663,6 +689,9 @@ const SHIFT_QUESTION = {
     false: 'continues, follows up on, or depends on the previous task',
   },
 };
+
+// Below this confidence a size or model answer is not acted on.
+const CONFIDENT = 0.6;
 
 async function classify(prompt, previous, apiKey) {
   const state = { message: redact(prompt).slice(0, 4000) };
@@ -709,6 +738,18 @@ async function classify(prompt, previous, apiKey) {
         false: 'it does not say who should do the work',
       },
     },
+    model: {
+      type: 'choice',
+      // Sent with every sized prompt: keep it short. The none criterion names
+      // the cases a name match gets wrong, since this answer alone can start
+      // the most expensive route.
+      instructions: 'Does the user, in their own words, ask the Fable or Astra AI model to do this work?',
+      criteria: {
+        none: 'no such request: the name is only mentioned, is in quoted or pasted text (a log, email, code, someone else\'s words), is refused ("don\'t use fable"), or means something else (a story, the Fable compiler, Astra DB)',
+        fable: 'the user asks the Fable model to do this work, such as "use fable for this"',
+        astra: 'the user asks the Astra model to do this work, such as "have astra do it"',
+      },
+    },
     effort: {
       type: 'score',
       instructions: 'How much reasoning effort does the message need, regardless of how big the job is?',
@@ -731,6 +772,10 @@ async function classify(prompt, previous, apiKey) {
     const value = data.answers[key] && data.answers[key].noul;
     return Number.isFinite(value) ? value : null;
   };
+  // Gated like size: an unsure "fable" or "astra" must not spend the most
+  // expensive route on a message that only mentions the name.
+  const model = data.answers.model;
+  const asked = model && ['fable', 'astra'].includes(model.choice) && Number.isFinite(model.confidence) && model.confidence >= CONFIDENT;
   return {
     size: answer.choice,
     confidence: answer.confidence,
@@ -739,10 +784,14 @@ async function classify(prompt, previous, apiKey) {
     heavy: noul('heavy'),
     coding: noul('coding'),
     self: noul('self'),
+    model: asked ? model.choice : 'none',
     effort: effortLevel(data.answers.effort && data.answers.effort.score),
     cost: (data.usage && data.usage.cost) || 0,
   };
 }
+
+// Cheap local check for a model the user can ask for by name.
+const NAMES_MODEL = /\b(fable|astra)\b/i;
 
 function looksSkippable(prompt) {
   const trimmed = prompt.trim();
@@ -756,7 +805,7 @@ function looksSkippable(prompt) {
 // helpers shared with the mid-turn usage watch (jev-usage-watch.js).
 module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
-  routeAdvice, limitNoticeFor, modelChangeNotice, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
+  routeAdvice, limitKey, limitNoticeFor, modelChangeNotice, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
   coldCache, coldGuardReason, modelStreak, effortLevel, effortStreak, sessionEffort,
   claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
@@ -830,14 +879,30 @@ function main() {
         notices.push(limitNotice.text);
         writeState(state);
       }
+      // This prompt is routed, or the session copied, with the crossing in
+      // view, so the tool hook (jev-usage-watch.js, same key) has nothing to
+      // add in this session.
+      const limitNote = transfer ? limitKey(claude, 'auto') : limitNotice && limitNotice.key;
+      if (limitNote && sessionId && state.sessions[sessionId]?.limitNote !== limitNote) {
+        st.putSessionSetting(state, sessionId, 'limitNote', limitNote);
+        writeState(state);
+      }
 
       // Codex's AGENTS.md is generated locally, cheap enough to keep in sync on
       // every prompt. RTK hook setup is too slow for this hook, so it only
       // gets a once-per-session pointer.
       if (state.sync) {
         try {
-          if (sync.syncAgents({ style: skills.outputStyle(state.outputStyle).skill }) === 'updated') {
+          const synced = sync.syncAgents({ style: skills.outputStyle(state.outputStyle).skill });
+          if (synced === 'updated') {
             notices.push('Jev: regenerated ~/.codex/AGENTS.md to match CLAUDE.md, RTK and the output-style skill. Stop this with /mynameisjev:sync off.');
+          } else if (synced.startsWith('skipped: ') && synced !== 'skipped: Codex not installed' && sessionId && state.sessions[sessionId]?.syncSkip !== synced) {
+            // Sync is on but did nothing: said once per session and reason,
+            // or Codex keeps running on stale instructions unnoticed. With no
+            // Codex there is nothing to keep in sync.
+            st.putSessionSetting(state, sessionId, 'syncSkip', synced);
+            writeState(state);
+            notices.push(`Jev: ~/.codex/AGENTS.md was not regenerated (${synced.slice('skipped: '.length)}). Run /mynameisjev:sync for details, or stop this with /mynameisjev:sync off.`);
           }
         } catch (e) {
           notices.push(`Jev: could not regenerate ~/.codex/AGENTS.md (${e.message}).`);
@@ -877,8 +942,12 @@ function main() {
       const sessionFamily = sessionModelFamily(sessionId, transcriptPath);
       setRoute(state, 'claude', sessionFamily, 'session', sessionId);
       // Marks the turn for the tiebreak cap (jev-tiebreak.js); unlike
-      // route.at, nothing else changes it mid-turn.
+      // route.at, nothing else changes it mid-turn. Kept per session so a
+      // prompt elsewhere does not start a new turn here; the global one
+      // serves callers with no session ID.
       state.promptAt = new Date().toISOString();
+      if (sessionId) st.putSessionSetting(state, sessionId, 'promptAt', state.promptAt);
+      tiebreak.startTurn(state, sessionId);
 
       const project = st.readProjectConfig(st.projectDir(cwd));
       if (project && project.error && state.projectNotice !== `${sessionId}:${project.path}`) {
@@ -892,15 +961,21 @@ function main() {
       // Overrides need no Jev call, so they work without a key and in
       // projects that turn sizing off.
       const override = parseOverride(prompt);
-      if (override) {
-        const o = overrideAdvice(override, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits, cwd });
-        state.stats.forced += 1;
+      // Routes this message as an explicit request says, whether a "+" prefix
+      // or plain language. `count` bumps the stat for the caller's kind of
+      // request, given the advice.
+      const applyOverride = (request, count) => {
+        const o = overrideAdvice(request, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits, cwd });
+        count(o);
         if (o.route[0] === 'codex') st.markGuided(state, sessionId, review);
         setRoute(state, ...o.route, sessionId, o.effort);
         state.lastSilent = null;
         writeState(state);
         if (o.notice) notices.push(o.notice);
         output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: o.note };
+      };
+      if (override) {
+        applyOverride(override, () => { state.stats.forced += 1; });
         return;
       }
 
@@ -915,7 +990,9 @@ function main() {
         return;
       }
 
-      if (looksSkippable(prompt)) {
+      // A short message that names Fable or Astra still goes to Jev: only the
+      // model question can tell a request ("have Astra do it") from a mention.
+      if (looksSkippable(prompt) && (prompt.startsWith('/') || !NAMES_MODEL.test(prompt))) {
         recordSilent(state, 'skipped', 'short or slash-command message');
         return;
       }
@@ -950,9 +1027,20 @@ function main() {
           '/mynameisjev:handoff first saves a note of the old task to pick up later.');
       }
 
+      // An explicit model request uses the same route as its prefix. A request
+      // to do the work in this session takes precedence over delegation.
+      if (result.model !== 'none' && !askedClaude(result)) {
+        // Counted as the note it gives; `forced` is for "+" prefixes only.
+        applyOverride({ target: result.model === 'fable' ? 'fable' : 'codex', tier: result.model === 'astra' ? 'astra' : null, token: null }, (o) => {
+          if (o.route[0] === 'codex') state.stats.codex += 1;
+          else if (o.route[2] === 'suggested') state.stats.helper += 1;
+        });
+        return;
+      }
+
       const tier = TIER_INFO[result.size] ? result.size : null;
       const confident = Number.isFinite(result.confidence);
-      if (!tier || !confident || result.confidence < 0.6) {
+      if (!tier || !confident || result.confidence < CONFIDENT) {
         recordSilent(state, 'unsure', !tier ? `unknown size "${result.size}"`
           : !confident ? `${tier} with no confidence`
             : `${tier} at confidence ${result.confidence.toFixed(2)} (< 0.60)`);

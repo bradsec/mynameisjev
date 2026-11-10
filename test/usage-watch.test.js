@@ -7,6 +7,7 @@ const path = require('path');
 // A throwaway home: auto-transfer writes its transcript copy under
 // ~/.claude/projects, and Codex detection reads settings and PATH.
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-watch-'));
+test.after(() => fs.rmSync(home, { recursive: true, force: true }));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 const claudeDir = path.join(home, '.claude');
@@ -53,6 +54,10 @@ test('records hand-offs that ran, even below the usage thresholds', async () => 
   assert.strictEqual(route.model, 'haiku');
   assert.strictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'Explore' } }), null);
   assert.deepStrictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', model: 'sonnet' } }), { target: 'claude', model: 'sonnet' });
+  assert.deepStrictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', model: 'fable' } }), { target: 'claude', model: 'fable' });
+  await watcher.watch({ session_id: 's', tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', model: 'fable', prompt: 'x' } });
+  route = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
+  assert.deepStrictEqual({ target: route.target, model: route.model, how: route.how }, { target: 'claude', model: 'fable', how: 'ran' });
   assert.strictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose' } }), null);
   assert.deepStrictEqual(watcher.handOff({ tool_name: 'Agent', tool_input: { subagent_type: 'mynameisjev:hardest' } }), { target: 'claude', model: 'opus' });
   assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: 'ls' } }), null);

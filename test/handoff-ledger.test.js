@@ -6,6 +6,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-ledger-'));
+test.after(() => fs.rmSync(home, { recursive: true, force: true }));
 process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude');
 process.env.CODEX_HOME = path.join(home, '.codex');
 const ledger = require('../plugin/scripts/jev-handoff-ledger');

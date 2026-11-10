@@ -99,8 +99,9 @@ test('decide refuses without an API key, before any request', async () => {
 });
 
 // Runs the CLI as the command does: JSON on stdin, fetch stubbed.
-test('jev-cli decide reads stdin, prints the pick, and exits 1 on bad input', () => {
+test('jev-cli decide reads stdin, prints the pick, and exits 1 on bad input', (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-decide-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const stub = path.join(tmp, 'stub-fetch.js');
   fs.writeFileSync(stub, `global.fetch = async (url, opts) => ({ ok: true, json: async () => ({ answers: { pick: { choice: 'o2', probabilities: { o1: 0.1, o2: 0.9 } } }, usage: { cost: 0.00002 } }) });`);
   const cli = path.join(__dirname, '..', 'plugin', 'scripts', 'jev-cli.js');
