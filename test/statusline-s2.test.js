@@ -22,6 +22,8 @@ const record = path.join(tmp, 'spawn.json');
 const preload = path.join(tmp, 'win32-stub.js');
 fs.writeFileSync(preload, `
 Object.defineProperty(process, 'platform', { value: process.env.JEV_S2_PLATFORM });
+if (process.env.JEV_S2_SYSTEMROOT) process.env.SystemRoot = process.env.JEV_S2_SYSTEMROOT;
+else delete process.env.SystemRoot;
 require('child_process').spawnSync = (file, args, options) => {
   if (!Array.isArray(args)) { options = args; args = []; }
   require('fs').writeFileSync(process.env.JEV_S2_RECORD, JSON.stringify({ file, args, shell: options.shell || false }));
@@ -42,11 +44,17 @@ function wrapped(platform, extraEnv, cwd = tmp) {
   fs.writeFileSync(path.join(claudeDir, 'mynameisjev', 'state.json'), JSON.stringify({
     enabled: true, statusLineMode: 'wrap', previousStatusLine: { type: 'command', command: COMMAND },
   }));
-  // A bare environment: nothing from the host can supply a shell.
+  // A bare environment: nothing from the host can supply a shell. On real
+  // Windows node itself cannot start without the real SystemRoot, so the
+  // child keeps it and the preload swaps in the test's value (or none) before
+  // the script runs.
+  const { SystemRoot: testRoot, ...rest } = extraEnv || {};
   const env = {
     HOME: tmp, CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(tmp, 'codex'),
     PATH: path.join(tmp, 'empty'), PATHEXT: '.exe',
-    JEV_S2_PLATFORM: platform, JEV_S2_RECORD: record, ...extraEnv,
+    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+    JEV_S2_SYSTEMROOT: testRoot || '',
+    JEV_S2_PLATFORM: platform, JEV_S2_RECORD: record, ...rest,
   };
   const out = execFileSync(process.execPath, ['-r', preload, script], { input: '{"model":{"display_name":"Opus 5.5"}}', env, cwd }).toString();
   return { out, call: fs.existsSync(record) ? JSON.parse(fs.readFileSync(record, 'utf8')) : null };
@@ -62,6 +70,12 @@ function touch(...parts) {
 // A stand-in Windows directory holding Windows PowerShell 5.1.
 const SystemRoot = path.join(tmp, 'Windows');
 const powershell = touch('Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+// With no usable SystemRoot the script falls back to C:\Windows. That file
+// exists only on real Windows; elsewhere nothing starts.
+const fallback = ['C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'].join(path.sep);
+const fallbackCall = path.isAbsolute(fallback) && fs.existsSync(fallback)
+  ? { file: fallback, args: ['-NoProfile', '-NonInteractive', '-Command', COMMAND], shell: false }
+  : null;
 
 test('S2: on Windows the wrapped command runs through Git Bash, not cmd.exe', () => {
   const bash = touch('set', 'bin', 'bash.exe');
@@ -116,10 +130,11 @@ test('S2/P1: a decoy shell in the working directory is never started', () => {
   const { call } = wrapped('win32', hostile, proj);
   assert.ok(path.isAbsolute(call.file), `started ${call.file}`);
   assert.strictEqual(call.file, powershell);
-  // No environment at all still gives an absolute path, never a bare name.
-  assert.strictEqual(wrapped('win32', { PATH: '' }, proj).call, null, 'nothing starts when PowerShell is not where Windows keeps it');
+  // No environment at all still gives an absolute path, never a bare name:
+  // only the real Windows PowerShell, or nothing where it does not exist.
+  assert.deepStrictEqual(wrapped('win32', { PATH: '' }, proj).call, fallbackCall, 'only PowerShell where Windows keeps it may start');
   // A relative SystemRoot is not trusted either.
-  assert.strictEqual(wrapped('win32', { SystemRoot: '.', PATH: '' }, proj).call, null);
+  assert.deepStrictEqual(wrapped('win32', { SystemRoot: '.', PATH: '' }, proj).call, fallbackCall);
 });
 
 test('S2/P1: with no usable shell, wrap mode says so and starts nothing', () => {
