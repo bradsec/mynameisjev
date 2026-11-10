@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.29
 
 - Route explicit `+fable` and plain-language Fable requests to a Fable
   subagent, or handle them in the session when it already runs Fable.
