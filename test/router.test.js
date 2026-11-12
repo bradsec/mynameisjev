@@ -170,6 +170,11 @@ test('codex notes: Claude writes the brief, has the final say, and reviews when 
   const on = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true }));
   assert.match(on.note, /senior developer with the final say/);
   assert.match(on.note, /Goal; Context .*Done when; Verify with/);
+  assert.match(on.note, /Verify with \(the test or check to run and its expected result\)/);
+  assert.match(on.note, /checks it ran with their results, saying plainly if a check failed or was skipped/);
+  assert.match(on.note, /every changed hunk traces to the brief; reject out-of-scope changes/);
+  assert.match(on.note, /read what new tests assert/);
+  assert.match(on.note, /After two send-backs on the same task, stop and report to the user/);
   assert.match(on.note, /task --model \S+ --effort \S+ 2>"\$jev_err" <<'(JEV_BRIEF_[a-f0-9]+)'\n<the brief>\n\1\n/, 'brief goes on stdin, not as a quoted argument');
   assert.match(on.note, /token-efficiently/);
   assert.match(on.note, /installed skills .*fit/);
@@ -194,6 +199,7 @@ test('codex notes: Claude writes the brief, has the final say, and reviews when 
   assert.match(off.note, /Notes for the lead/);
   assert.match(off.note, /--resume-last/, 'follow-ups keep the Codex thread without review too');
   assert.doesNotMatch(off.note, /git diff --stat/);
+  assert.doesNotMatch(off.note, /After two send-backs/);
 });
 
 test('codex notes: tell Codex to use rtk only when it is installed', () => {

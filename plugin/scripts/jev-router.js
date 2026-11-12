@@ -548,10 +548,10 @@ function codexAdvice(tier, result, reason, choice, companion, opts) {
 const BRIEF = 'You are the senior developer with the final say, and Codex is a developer on your team: ' +
   'what it returns is a proposal you accept, fix or reject. Do not pass the user\'s message through as is. ' +
   'Write Codex a short brief: Goal; Context (the files, decisions and findings from this conversation it needs); ' +
-  'Constraints (style, scope, what not to touch); Done when; Verify with (the test or check to run). ' +
+  'Constraints (style, scope, what not to touch); Done when; Verify with (the test or check to run and its expected result). ' +
   'Tell Codex to work token-efficiently (read only what it needs, terse report), to use whichever of its installed skills fit ' +
   'the task (for example ones for the simplest solution, test-first work, debugging or terse output) and any other that ' +
-  'saves tokens without lowering the quality of the work, and to end with the files it changed, the checks it ran, and ' +
+  'saves tokens without lowering the quality of the work, and to end with the files it changed, the checks it ran with their results, saying plainly if a check failed or was skipped, and ' +
   'Notes for the lead: risks, anything in the brief it disagrees with, and suggestions. If the brief conflicts with the ' +
   'code, Codex should stop and report the conflict instead of guessing. Work token-efficiently yourself too: keep the brief ' +
   'and your replies short, read only what you need, and use your own installed skills that fit, especially ones that cut ' +
@@ -561,8 +561,10 @@ const RTK_BRIEF = 'RTK is installed: tell Codex to prefix its shell commands wit
 // has no hook to add the prefix for it.
 const brief = () => (sync.rtkBinary() ? `${BRIEF} ${RTK_BRIEF}` : BRIEF);
 const REVIEW = 'When Codex returns, review its work cheaply: read git diff --stat and the diff of the changed files only, ' +
-  'not whole files, and run the final relevant check yourself. Weigh its Notes for the lead: act on each or tell the user why not. ' +
+  'not whole files; check that every changed hunk traces to the brief; reject out-of-scope changes; read what new tests assert; and run the final relevant check yourself. ' +
+  'Weigh its Notes for the lead: act on each or tell the user why not. ' +
   'Fix small issues yourself (about 10 lines or fewer); send anything larger back to Codex as a follow-up brief with --resume-last. ' +
+  'After two send-backs on the same task, stop and report to the user instead of sending it back again. ' +
   'Then tell the user the outcome in one or two lines.';
 const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do the work yourself, do it here instead.';
 // After the first Codex note of a session (or since its last compaction) the

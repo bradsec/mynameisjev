@@ -447,10 +447,11 @@ Claude is the senior developer and has the final say; Codex works as a
 developer on its team. For every Codex hand-off the router tells Claude not
 to pass your message through as is, but to write Codex a short brief: goal,
 the context from this conversation it needs, constraints, what done means,
-and the check to run. The brief asks Codex to work token-efficiently, to use
+and the check to run with its expected result. The brief asks Codex to work token-efficiently, to use
 its installed skills where they fit, including skills for simple solutions,
 test-first work and debugging, and any that save tokens without lowering
-quality. Codex ends with files changed, checks run and Notes for the lead.
+quality. Codex ends with files changed, checks run with their results (saying
+plainly if one failed or was skipped) and Notes for the lead.
 With the `rtk` CLI on your `PATH`, the brief also tells Codex to prefix its
 shell commands with `rtk`. Claude uses its own installed skills the same way.
 Codex briefs use a quoted heredoc to preserve shell-sensitive text.
@@ -473,9 +474,11 @@ instead.
 
 With review on (the default), Claude checks Codex's work cheaply when it
 returns: it reads `git diff --stat` and the diff of the changed files, not
-whole files, and runs the smallest relevant check. It fixes small issues
-itself (about 10 lines or fewer) and sends larger ones back to Codex as a
-follow-up brief. With `/mynameisjev:enforce on`, Claude's own edits are
+whole files, checks that every change traces to the brief, rejects
+out-of-scope changes, reads what new tests assert, and runs the smallest
+relevant check. It fixes small issues itself (about 10 lines or fewer) and
+sends larger ones back to Codex as a follow-up brief. After two send-backs
+on the same task it stops and reports to you. With `/mynameisjev:enforce on`, Claude's own edits are
 allowed again once a foreground Codex task returns or a background task's
 result is read. `/mynameisjev:review off` turns review off for the current
 session; `/mynameisjev:review --default off` for new sessions.

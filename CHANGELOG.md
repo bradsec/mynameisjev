@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Codex briefs now ask for each check's expected result, and Codex reports
+  checks with their results, saying plainly if one failed or was skipped.
+- With review on, Claude checks that every change traces to the brief,
+  rejects out-of-scope changes, reads what new tests assert, and stops and
+  reports to you after two send-backs on the same task.
+
 ## 0.3.29
 
 - Route explicit `+fable` and plain-language Fable requests to a Fable
