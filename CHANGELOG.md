@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.30
 
 - Codex briefs now ask for each check's expected result, and Codex reports
   checks with their results, saying plainly if one failed or was skipped.
