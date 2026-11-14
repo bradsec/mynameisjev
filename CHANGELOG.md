@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.33
 
 - The first Claude helper note in a session, and the first after a
   compaction, tells Claude to brief the helper with "Done when" and "Verify
