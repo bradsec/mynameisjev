@@ -51,6 +51,14 @@ test('compaction resets the guidance so the next Codex note is full', () => {
   assert.strictEqual(handle('start', { session_id: 'old', source: 'compact' }, s, now), false, 'nothing to reset');
 });
 
+test('compaction resets the helper brief flag so the next helper note is full', () => {
+  const s = { ...st.DEFAULT_STATE, sessions: {} };
+  st.markHelperGuided(s, 'old');
+  assert.strictEqual(st.helperGuidedFor(s, 'old'), true);
+  assert.ok(handle('start', { session_id: 'old', source: 'compact' }, s, now));
+  assert.strictEqual(st.helperGuidedFor(s, 'old'), false);
+});
+
 test('two /clears in one directory before either new session starts carry nothing', () => {
   const s = fresh();
   st.putSessionSetting(s, 'other', 'prefer', 'codex');

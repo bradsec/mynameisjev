@@ -106,8 +106,15 @@ async function watch(hookInput) {
   const reviewing = !!(reviewOn && before && before.target === 'codex' && before.reviewing);
   if (ran) {
     // A new Codex task while Claude reviews the last result: sent back.
-    if (ran.target === 'codex' && reviewing) current.stats.reviewSendBacks = (current.stats.reviewSendBacks || 0) + 1;
-    if (reviewOn && ran.target === 'codex' && ran.reviewing) current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
+    // The send-back counts against the task under review, not the new one.
+    if (ran.target === 'codex' && reviewing) {
+      current.stats.reviewSendBacks = (current.stats.reviewSendBacks || 0) + 1;
+      st.addCodexOutcome(current, before.model, 'sendBacks');
+    }
+    if (reviewOn && ran.target === 'codex' && ran.reviewing) {
+      current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
+      st.addCodexOutcome(current, ran.model, 'returns');
+    }
     // session keeps the Codex edit guard (jev-codex-steps.js) on for this turn.
     st.putRoute(current, { at: new Date().toISOString(), ...ran, how: 'ran', session: hookInput.session_id || null });
     current.stats[ran.target === 'codex' ? 'codexRuns' : 'helperRuns'] += 1;
@@ -124,13 +131,17 @@ async function watch(hookInput) {
   if (!ran && route && route.target === 'codex' && route.session && !route.reviewing &&
       result && resultFinished(hookInput)) {
     st.putRoute(current, { ...route, reviewing: true });
-    if (reviewOn) current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
+    if (reviewOn) {
+      current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
+      st.addCodexOutcome(current, route.model, 'returns');
+    }
     try { st.writeState(current); } catch (e) { /* the edit guard stays on for this one */ }
   }
   // Claude's first own edit while reviewing a Codex result: fixed in place.
   if (reviewing && !before.fixed && EDIT_TOOLS.has(hookInput.tool_name)) {
     st.putRoute(current, { ...before, fixed: true });
     current.stats.reviewFixes = (current.stats.reviewFixes || 0) + 1;
+    st.addCodexOutcome(current, before.model, 'fixes');
     try { st.writeState(current); } catch (e) { /* the report misses one */ }
   }
   if (hookInput.agent_id) return null;

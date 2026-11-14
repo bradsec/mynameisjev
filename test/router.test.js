@@ -57,6 +57,13 @@ test('delegation: names the plugin agents', () => {
   assert.match(router.delegationAdvice('everyday', result(), 'opus'), /"mynameisjev:everyday"/);
 });
 
+test('delegation: the first helper note carries the brief rules, later ones do not', () => {
+  const full = router.delegationAdvice('everyday', result(), 'opus');
+  assert.match(full, /Done when/);
+  assert.match(full, /at most twice/);
+  assert.doesNotMatch(router.delegationAdvice('everyday', result(), 'opus', { guided: true }), /Done when/);
+});
+
 test('route: without Codex, coding work gets Claude advice', () => {
   const r = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx());
   assert.strictEqual(r.codex, false);

@@ -35,8 +35,9 @@ function handle(mode, hookInput, state, nowMs) {
   }
   if (mode !== 'start') return false;
   if (hookInput.source === 'compact') {
-    if (!st.guidedFor(state, session, true) && !st.guidedFor(state, session, false)) return false;
+    if (!st.guidedFor(state, session, true) && !st.guidedFor(state, session, false) && !st.helperGuidedFor(state, session)) return false;
     st.putSessionSetting(state, session, 'guided', null);
+    st.putSessionSetting(state, session, 'helperGuided', null);
     return true;
   }
   if (hookInput.source !== 'clear') return false;

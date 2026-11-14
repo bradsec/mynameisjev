@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The first Claude helper note in a session, and the first after a
+  compaction, tells Claude to brief the helper with "Done when" and "Verify
+  with", check its report against them, and send it back at most twice.
+- The `tiny` and `everyday` helpers stop after 25 and 40 turns
+  (`maxTurns`).
+- `/mynameisjev:report` shows Codex review outcomes per Codex model,
+  with the send-back rate.
+
 ## 0.3.32
 
 - Fix the Codex wrapper on Windows: a task that exits before reading its

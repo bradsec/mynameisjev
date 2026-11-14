@@ -106,6 +106,16 @@ test('helper notes are counted', () => {
   assert.strictEqual(r.state.stats.helper, 1);
 });
 
+test('only the first helper note of a session carries the brief rules', () => {
+  const first = run('Write a short email to my landlord about the faucet.');
+  assert.match(first.out.hookSpecificOutput.additionalContext, /Done when/);
+  assert.strictEqual(first.state.sessions.s1.helperGuided, true);
+  const later = run('Write a short email to my neighbour about the fence.', { keepState: true });
+  assert.doesNotMatch(later.out.hookSpecificOutput.additionalContext, /Done when/);
+  const override = run('+large research the options and write a report', { keepState: true, session: 's2' });
+  assert.match(override.out.hookSpecificOutput.additionalContext, /Done when/, 'a "+" helper override is a hand-off too');
+});
+
 test('cold-cache guard blocks once per expiry, never slash commands, only when on', () => {
   const expired = Math.floor(Date.now() / 1000) - 600;
   fs.writeFileSync(path.join(dataDir, 'prompt-cache.json'), JSON.stringify({ s1: { expires_at: expired, ttl: '5m', recache: 150000 } }));

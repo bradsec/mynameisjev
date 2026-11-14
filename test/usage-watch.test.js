@@ -155,6 +155,21 @@ test('review: an unfinished result keeps the guard; counts returns, fixes and se
   await bash('node "/p/codex-companion.mjs" task --write "follow-up"');
   const stats = read().stats;
   assert.deepStrictEqual([stats.codexReturns, stats.reviewFixes, stats.reviewSendBacks], [2, 1, 1], 'two results back, one fixed, one sent back');
+  assert.deepStrictEqual(read().codexOutcomes, { default: { returns: 2, fixes: 1, sendBacks: 1 } }, 'counted per Codex model');
+});
+
+test('review outcomes are kept per Codex model', async () => {
+  setState({});
+  setUsage(10);
+  const read = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
+  const bash = (command, tool_response) => watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command }, tool_response });
+  await bash('node "/p/codex-companion.mjs" task --model gpt-6-luna --write "x"');
+  await bash('node "/p/codex-companion.mjs" task --model gpt-6.1-sol --write "redo"');
+  await watcher.watch({ session_id: 's', tool_name: 'Edit', tool_input: { file_path: 'a.js' } });
+  assert.deepStrictEqual(read().codexOutcomes, {
+    'gpt-6-luna': { returns: 1, fixes: 0, sendBacks: 1 },
+    'gpt-6.1-sol': { returns: 1, fixes: 1, sendBacks: 0 },
+  });
 });
 
 test('fast path exits only below every threshold, including the pace', () => {

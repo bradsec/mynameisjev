@@ -130,6 +130,7 @@ test('R4: the first calls two hooks record for a feature or helper model both co
     st.addCost(s, 'sizing', 0.25);
     s.helperTokens.haiku = { runs: 1, input: 10, cacheWrite: 0, cacheRead: 0, output: 5 };
     s.stats.custom = (s.stats.custom || 0) + 1;
+    st.addCodexOutcome(s, 'gpt-6-luna', 'returns');
     st.writeState(s);
   }
   const s = onDisk();
@@ -137,6 +138,7 @@ test('R4: the first calls two hooks record for a feature or helper model both co
   assert.deepStrictEqual(s.costs.sizing, { calls: 2, cost: 0.5 });
   assert.deepStrictEqual(s.helperTokens.haiku, { runs: 2, input: 20, cacheWrite: 0, cacheRead: 0, output: 10 });
   assert.strictEqual(s.stats.custom, 2);
+  assert.deepStrictEqual(s.codexOutcomes['gpt-6-luna'], { returns: 2, fixes: 0, sendBacks: 0 });
 });
 
 test('R4: a route or Codex tier new to both hooks is still replaced whole', () => {

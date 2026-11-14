@@ -7,6 +7,7 @@ description: >
 tools: [Read, Edit, Write, Grep, Glob, Bash, WebFetch]
 model: sonnet
 effort: medium
+maxTurns: 40
 ---
 
 Do the self-contained task you were given. Match existing conventions where

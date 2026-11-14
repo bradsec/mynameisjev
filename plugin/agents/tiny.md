@@ -7,6 +7,7 @@ description: >
 tools: [Read, Edit, Grep, Glob, Bash]
 model: haiku
 effort: low
+maxTurns: 25
 ---
 
 Do the self-contained task you were given. No scope creep, no exploration

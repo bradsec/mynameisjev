@@ -178,7 +178,14 @@ function sessionModelFamily(sessionId, transcriptPath) {
 
 // Decide whether a delegation note is worth adding. Returns the note text, or
 // { suppress: reason } when handing off would not pay for itself.
-function delegationAdvice(tier, result, sessionFamily) {
+// Claude checks a helper's work as it does Codex's (BRIEF, REVIEW). Sent with
+// the first helper note of a session or since its last compaction
+// (st.helperGuidedFor); later notes rely on it being in context.
+const HELPER_BRIEF = ' If you delegate, give the subagent a brief that ends with Done when and Verify with (check and expected result). ' +
+  'Check its report against them; send it back at most twice, then report to the user.';
+const helperBrief = (guided) => (guided ? '' : HELPER_BRIEF);
+
+function delegationAdvice(tier, result, sessionFamily, { guided } = {}) {
   const info = TIER_INFO[tier];
   const head = `Jev sized this message as ${tier.toUpperCase()} (confidence ${result.confidence.toFixed(2)}).`;
   const contained = result.contained !== null && result.contained >= NOUL_THRESHOLD;
@@ -190,18 +197,18 @@ function delegationAdvice(tier, result, sessionFamily) {
   if (tier === 'tiny' && !heavy) return { suppress: 'tiny: subagent start-up costs more than it saves' };
 
   if (!sessionFamily) {
-    return `${head} Session model unknown. If this is self-contained work, consider delegating it to the "${info.agent}" subagent (${helperLabel(info)}).`;
+    return `${head} Session model unknown. If this is self-contained work, consider delegating it to the "${info.agent}" subagent (${helperLabel(info)}).${helperBrief(guided)}`;
   }
   const agentRank = MODEL_RANK[info.model];
   const sessionRank = MODEL_RANK[sessionFamily];
   if (agentRank < sessionRank) {
-    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is cheaper than this session's ${sessionFamily} and fits the job; consider delegating it.`;
+    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is cheaper than this session's ${sessionFamily} and fits the job; consider delegating it.${helperBrief(guided)}`;
   }
   if (agentRank > sessionRank) {
-    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is stronger than this session's ${sessionFamily}; delegate it if quality matters more than cost.`;
+    return `${head} The "${info.agent}" subagent (${helperLabel(info)}) is stronger than this session's ${sessionFamily}; delegate it if quality matters more than cost.${helperBrief(guided)}`;
   }
   if (heavy) {
-    return `${head} "${info.agent}" runs the same model as this session (${sessionFamily}), so it saves no cost, but delegating keeps this task's bulky intermediate output out of the main context.`;
+    return `${head} "${info.agent}" runs the same model as this session (${sessionFamily}), so it saves no cost, but delegating keeps this task's bulky intermediate output out of the main context.${helperBrief(guided)}`;
   }
   return { suppress: `${tier}: same model as session (${sessionFamily}), little output to isolate` };
 }
@@ -411,7 +418,7 @@ function routeAdvice(tier, result, ctx) {
     return { note: codexAdvice(tier, result, reason, choice, companion, opts), codex: true, model: choice.model || 'default' };
   }
 
-  const advice = delegationAdvice(tier, result, ctx.sessionFamily);
+  const advice = delegationAdvice(tier, result, ctx.sessionFamily, { guided: ctx.helperGuided });
   return typeof advice === 'string' ? { note: advice, codex: false, model: TIER_INFO[tier].model, effort: TIER_INFO[tier].effort } : advice;
 }
 
@@ -654,7 +661,7 @@ function overrideAdvice(o, ctx) {
     // Fable. Claude knows its own model; the hook does not.
     const unknown = !ctx.sessionFamily;
     return {
-      note: `${prefix}${unknown ? 'If this session already runs Fable, handle this message here. Otherwise delegate' : 'Delegate'} it without asking with the Agent tool, subagent_type: "general-purpose", model: "fable", and a self-contained prompt that carries any context it needs from this conversation.`,
+      note: `${prefix}${unknown ? 'If this session already runs Fable, handle this message here. Otherwise delegate' : 'Delegate'} it without asking with the Agent tool, subagent_type: "general-purpose", model: "fable", and a self-contained prompt that carries any context it needs from this conversation.${helperBrief(ctx.helperGuided)}`,
       route: ['claude', 'fable', 'suggested'],
     };
   }
@@ -662,7 +669,7 @@ function overrideAdvice(o, ctx) {
     const info = TIER_INFO[o.tier];
     return {
       note: `${prefix}The user wants it done by the "${info.agent}" subagent (${helperLabel(info)}). Delegate it without asking, ` +
-        'with a self-contained prompt that carries any context it needs from this conversation.',
+        `with a self-contained prompt that carries any context it needs from this conversation.${helperBrief(ctx.helperGuided)}`,
       route: ['claude', info.model, 'suggested'],
       effort: info.effort,
     };
@@ -987,6 +994,7 @@ function main() {
       const prefer = st.preferFor(state, sessionId, project);
       const review = st.reviewFor(state, sessionId);
       const guided = st.guidedFor(state, sessionId, review);
+      const helperGuided = st.helperGuidedFor(state, sessionId);
 
       // Overrides need no Jev call, so they work without a key and in
       // projects that turn sizing off.
@@ -995,9 +1003,10 @@ function main() {
       // or plain language. `count` bumps the stat for the caller's kind of
       // request, given the advice.
       const applyOverride = (request, count) => {
-        const o = overrideAdvice(request, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, codexLimits: state.codexLimits, cwd });
+        const o = overrideAdvice(request, { sessionFamily, codexNow, codexCache, overrides: state.codexTiers, review, guided, helperGuided, codexLimits: state.codexLimits, cwd });
         count(o);
         if (o.route[0] === 'codex') st.markGuided(state, sessionId, review);
+        else if (o.route[2] === 'suggested') st.markHelperGuided(state, sessionId);
         setRoute(state, ...o.route, sessionId, o.effort);
         state.lastSilent = null;
         writeState(state);
@@ -1103,6 +1112,7 @@ function main() {
           preferCodex: prefer === 'codex',
           review,
           guided,
+          helperGuided,
           codexNow,
           codexCache,
           codexLimits: state.codexLimits,
@@ -1113,7 +1123,10 @@ function main() {
           if (advice.codex) {
             state.stats.codex += 1;
             st.markGuided(state, sessionId, review);
-          } else state.stats.helper += 1;
+          } else {
+            state.stats.helper += 1;
+            st.markHelperGuided(state, sessionId);
+          }
           setRoute(state, advice.codex ? 'codex' : 'claude', advice.model, 'suggested', sessionId, advice.effort);
           writeState(state);
           output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: advice.note };

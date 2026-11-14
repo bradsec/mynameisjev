@@ -79,3 +79,14 @@ test('report without per-feature data shows the old totals line', () => {
   assert.match(out[0], /^Jev calls: 3, cost \$0\.000300$/);
   assert.match(out[1], /^\s+earlier\s+3\s+\$0\.000300/);
 });
+
+test('report shows Codex review outcomes per model, with the send-back rate', () => {
+  fs.writeFileSync(statePath, JSON.stringify({
+    enabled: true,
+    stats: { codexReturns: 5, reviewFixes: 1, reviewSendBacks: 1 },
+    codexOutcomes: { 'gpt-6-luna': { returns: 4, fixes: 1, sendBacks: 1 }, 'gpt-6.1-sol': { returns: 1, fixes: 0, sendBacks: 0 } },
+  }));
+  const out = run(['report']).stdout.split('\n');
+  assert.ok(out.some((l) => /^\s+gpt-6-luna: 4 returned, fixed by Claude 1, sent back 1 \(25%\)$/.test(l)), out.join('\n'));
+  assert.ok(out.some((l) => /^\s+gpt-6\.1-sol: 1 returned, fixed by Claude 0, sent back 0 \(0%\)$/.test(l)));
+});

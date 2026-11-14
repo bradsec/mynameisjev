@@ -95,6 +95,9 @@ const DEFAULT_STATE = {
   // Token use of mynameisjev:* subagents per model, from their transcripts
   // (jev-subagent-stop.js): { haiku: { runs, input, cacheWrite, cacheRead, output } }.
   helperTokens: {},
+  // The review counters above per Codex model (jev-usage-watch.js):
+  // { 'gpt-6-luna': { returns, fixes, sendBacks } }.
+  codexOutcomes: {},
   // Total Jev cost in USD, and per feature (addCost): { sizing: { calls, cost } }.
   cost: 0,
   costs: {},
@@ -192,6 +195,7 @@ function normalize(parsed) {
     codexTiers: { ...(parsed.codexTiers || {}) },
     codexLimits: Object.fromEntries(Object.entries(parsed.codexLimits || {}).filter(([, at]) => Date.now() - Date.parse(at) < 7 * 86400000)),
     helperTokens: { ...(parsed.helperTokens || {}) },
+    codexOutcomes: { ...(parsed.codexOutcomes || {}) },
     costs: { ...(parsed.costs || {}) },
     routes: { ...(parsed.routes || {}) },
     sessions: { ...(parsed.sessions || {}) },
@@ -227,13 +231,13 @@ const isMap = (v) => isPlainObject(v) && Object.values(v).every((x) => typeof x 
 // Top-level keys whose numbers are running totals. Any other number (a time,
 // a rank, a recomputed total) is a value: adding two writers' differences to
 // it stores a number neither of them wrote.
-const COUNTERS = new Set(['stats', 'cost', 'costs', 'helperTokens', 'tiebreakTurn']);
+const COUNTERS = new Set(['stats', 'cost', 'costs', 'helperTokens', 'codexOutcomes', 'tiebreakTurn']);
 
 // Maps whose entries are records that several hooks add fields or counts to
-// (sessions[id], costs[feature], helperTokens[family]). An entry two hooks
+// (sessions[id], costs[feature], helperTokens[family], codexOutcomes[model]). An entry two hooks
 // both create is merged as additions to an empty one. Entries of other maps
 // (routes, codexTiers, clearCarry) are written whole, so the later one stands.
-const SHARED_RECORDS = new Set(['sessions', 'costs', 'helperTokens']);
+const SHARED_RECORDS = new Set(['sessions', 'costs', 'helperTokens', 'codexOutcomes']);
 
 // A hand-off ledger task's identity (jev-handoff-ledger.js register): its
 // Codex job, else the transcript offset of its tool call. Null when it has
@@ -390,7 +394,7 @@ function routeFor(state, session) {
   return state.route && state.route.session === session ? state.route : null;
 }
 
-// Per-session settings: 'prefer', 'review' or 'guided'.
+// Per-session settings: 'prefer', 'review', 'guided' or 'helperGuided'.
 function putSessionSetting(state, session, key, value) {
   const own = { ...((state.sessions || {})[session] || {}), [key]: value, at: new Date().toISOString() };
   const sessions = { ...(state.sessions || {}), [session]: own };
@@ -414,6 +418,23 @@ const guidedFor = (state, session, review) => !!session && sessionSetting(state,
 
 function markGuided(state, session, review) {
   if (session && !guidedFor(state, session, review)) putSessionSetting(state, session, 'guided', review ? 'review' : 'plain');
+}
+
+// Whether the session already got the helper brief rules since it started or
+// last compacted (jev-router.js helperBrief).
+const helperGuidedFor = (state, session) => !!session && sessionSetting(state, session, 'helperGuided') === true;
+
+function markHelperGuided(state, session) {
+  if (session && !helperGuidedFor(state, session)) putSessionSetting(state, session, 'helperGuided', true);
+}
+
+// Counts one Codex review outcome ('returns', 'fixes' or 'sendBacks') for
+// the model of the task it belongs to.
+function addCodexOutcome(state, model, kind) {
+  const key = model || 'default';
+  const own = { returns: 0, fixes: 0, sendBacks: 0, ...(state.codexOutcomes[key] || {}) };
+  own[kind] += 1;
+  state.codexOutcomes = { ...state.codexOutcomes, [key]: own };
 }
 
 function reviewFor(state, session) {
@@ -494,7 +515,7 @@ function projectDir(fallback) {
 
 module.exports = {
   PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, shareEffort, DEFAULT_STATE, readState, writeState,
-  putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided,
+  putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided, helperGuidedFor, markHelperGuided, addCodexOutcome,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
   MODEL_FAMILIES, GENERAL_TYPES, TIER_INFO,
 };

@@ -339,6 +339,14 @@ Jev call. The router then adds a note to Claude's context, or stays silent:
 | Size unsure, Claude plan low or prefer-Codex on | hand self-contained steps to Codex, only for coding or heavy work that is not a likely tiny job |
 | Claude plan at 80% or more, Codex has headroom | route self-contained work to Codex; for work that needs the conversation, hand its self-contained steps to Codex |
 
+The first Claude helper note in a session, and the first after a compaction,
+also tells Claude to give the helper a brief ending in "Done when" and "Verify
+with". Claude then checks the helper's report against both, and sends the work
+back at most twice before it reports to you. Later notes in the session leave
+this out because Claude already has it in context. The `tiny` and `everyday`
+helpers stop after 25 and 40 turns (`maxTurns`). Claude Code marks their output
+as partial, and Claude can resume them.
+
 ### Session model advice
 
 Delegation notes work per message. When the whole session runs on the wrong
@@ -410,7 +418,7 @@ Jev tells you once when a size moves to another model. Models you set with
 `/mynameisjev:codex set` always win; `/mynameisjev:codex show` lists the
 current picks.
 
-With Codex's list as of October 2026 the picks are:
+With Codex's list as of November 2026 the picks are:
 
 | Size | Codex model | With `+codex:<size>` | Effort |
 | --- | --- | --- | --- |
@@ -595,7 +603,8 @@ status line shows `off in project` or `project config error`, and
 - Claude helper and Codex notes given, next to the hand-offs that ran (runs
   include hand-offs Claude started without a note)
 - `+` overrides used, and notes suppressed because a hand-off would not pay off
-- `Codex results returned`, how many Claude fixed itself and sent back to Codex
+- `Codex results returned`, how many Claude fixed itself and sent back to Codex,
+  in total and per Codex model with the send-back rate
 - tokens used by `mynameisjev:*` subagents per model (input, cache write,
   cache read, output), read from their transcripts when they finish
 - Codex tokens per model from local rollout files, plus total and mean Claude
