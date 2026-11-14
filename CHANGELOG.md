@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.32
 
 - Fix the Codex wrapper on Windows: a task that exits before reading its
   whole brief no longer adds a stray `write EOF` error to its output.
