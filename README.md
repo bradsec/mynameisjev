@@ -221,7 +221,8 @@ your `PATH`) and turns on Codex routing, the Codex status line and
 Codex hides routine progress stderr unless a task fails. Tasks without
 `--write` are read-only; resuming one keeps that sandbox, so start a new
 `--write` task for edits or checks that write. Jev remembers Codex sandbox
-and network denials for seven days and adds a short hint to later notes.
+and network denials (including DNS failures such as `Could not resolve host`)
+for seven days and adds a short hint to later notes.
 `/mynameisjev:sync on` puts a rule in the generated `AGENTS.md`: report
 blocked commands without retrying sandbox, permission or network denials.
 
@@ -322,7 +323,7 @@ score is a second opinion, not a test result.
 
 ## How routing works
 
-Eligible prompts get one Jev call with seven questions, or eight when a prior
+Eligible prompts get one Jev call with eight questions, or nine when a prior
 message in the session is available. Skipped prompts and overrides get no
 Jev call. The router then adds a note to Claude's context, or stays silent:
 
@@ -334,6 +335,8 @@ Jev call. The router then adds a note to Claude's context, or stays silent:
 | Helper model stronger than the session's | "stronger, delegate if quality matters" |
 | Same model, lots of intermediate output | "keeps bulky output out of your context" |
 | Self-contained coding, Codex under 85% | route to Codex |
+| Needs the web (search, URL fetch, download) | not handed to Codex whole, since its sandbox may have no network; the Claude helper notes above apply |
+| Size unsure, Claude plan low or prefer-Codex on | hand self-contained steps to Codex, only for coding or heavy work that is not a likely tiny job |
 | Claude plan at 80% or more, Codex has headroom | route self-contained work to Codex; for work that needs the conversation, hand its self-contained steps to Codex |
 
 ### Session model advice
@@ -450,11 +453,32 @@ the context from this conversation it needs, constraints, what done means,
 and the check to run with its expected result. The brief asks Codex to work token-efficiently, to use
 its installed skills where they fit, including skills for simple solutions,
 test-first work and debugging, and any that save tokens without lowering
-quality. Codex ends with files changed, checks run with their results (saying
-plainly if one failed or was skipped) and Notes for the lead.
+quality. Codex ends with files changed and checks run with their results,
+saying plainly if one failed or was skipped. It adds Notes for the lead only
+for material risks, disagreements or suggestions, and never omits blockers or
+uncertainty.
 With the `rtk` CLI on your `PATH`, the brief also tells Codex to prefix its
 shell commands with `rtk`. Claude uses its own installed skills the same way.
-Codex briefs use a quoted heredoc to preserve shell-sensitive text.
+Codex briefs use a quoted heredoc to preserve shell-sensitive text:
+
+```bash
+node "<plugin>/scripts/jev-codex-run.js" --write <<'JEV_BRIEF_abcdef'
+<the brief>
+JEV_BRIEF_abcdef
+```
+
+The wrapper resolves the newest installed companion at run time and forwards
+flags, stdin and stdout. It hides progress stderr, prints the first thread-ready
+line on success, and prints the last 20 stderr lines on failure with the child's
+exit status (a signal produces a non-zero status). Background job IDs still print.
+Check background jobs with `node "<plugin>/scripts/jev-codex-run.js" status <job-id>`;
+read their output with `node "<plugin>/scripts/jev-codex-run.js" result <job-id>`.
+These two commands pass companion output through without filtering.
+After a foreground `--write` task in a git repository, the wrapper also
+prints the files the task changed and their diff against `HEAD`, cut at
+12,000 characters, so Claude's review needs no separate `git diff` calls.
+Files that were already dirty before the task are left out unless the task
+changed them too.
 The first full Codex note says when Codex reads project instructions, so
 Claude can omit those rules from the brief. `/mynameisjev:status` and
 `/mynameisjev:sync` report whether Codex reads the project's `AGENTS.md` or
@@ -577,7 +601,8 @@ status line shows `off in project` or `project config error`, and
 - Codex tokens per model from local rollout files, plus total and mean Claude
   brief and review tokens per hand-off. Use `report --session` for this session.
 
-Missing Codex rollout or Claude transcript data appears as unknown. The ledger
+Missing Codex rollout or Claude transcript data appears as unknown, with the
+reason a task found no Codex job when one was recorded. The ledger
 keeps the last 50 sessions locally. Codex tasks still bill your ChatGPT plan;
 the report does not convert tokens to dollars.
 
@@ -590,7 +615,7 @@ All off by default, because each one changes things outside the plugin.
 | Sync | `/mynameisjev:sync on` | **Replaces** `~/.codex/AGENTS.md` with a copy generated from `~/.claude/CLAUDE.md` (one backup kept as `AGENTS.md.jev.bak`), sets up RTK's Claude hook where missing, and reports plugins Codex lacks |
 | Output style | `/mynameisjev:style auto` or `/mynameisjev:style <skill id>` | With sync on, mirrors an installed, enabled Claude skill into Codex's `AGENTS.md`. Use `off` to remove it |
 | Enforce hand-offs | `/mynameisjev:enforce on` | When Jev suggested a Claude helper for the message, a general-purpose subagent that Claude starts without choosing a model runs on that helper's model and effort (an effort Claude chose stays). Named agents, calls that choose a model, Codex routes and other sessions are left alone, and permission prompts are unchanged. When the message is routed to Codex (the whole task, or `→ codex steps` near the limit), Claude's own Edit, Write and NotebookEdit calls are denied with the Codex companion command, so edits use Codex's quota. Edits through Bash are not blocked; the note tells Claude not to make them. Send `+claude` to lift it for a message |
-| Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the `codex resume` command. Old copies stay in Codex until you delete them |
+| Auto-transfer | `/mynameisjev:transfer on` | From 90% Claude usage, copies the session into a new Codex thread (again at most every 10 minutes per session) and shows the `codex resume` command. Old copies stay in Codex until you delete them |
 | Cold-cache guard | `/mynameisjev:coldguard on` | Blocks the first message after the prompt cache expired on a context of 100k tokens or more, so you can `/compact` or `/clear` before paying to re-cache it. The block message shows your text; send it again to go ahead. Slash commands are never blocked. Jev's status line shows `guard armed` next to the cold cache when the next message would be blocked. Needs the status line, which records the cache state |
 | Completeness check | `/mynameisjev:check on` | When Claude finishes a turn, Jev checks that the final reply covers every part of your request: each list item, or each sentence when there is no list, gets a yes/no question. If a part looks missed (and Claude is not waiting on you), Claude continues once with those parts quoted, to finish them or say why they were skipped. It never blocks twice in a turn, and a failed Jev call never blocks. Jev also sees the files Claude edited this turn (with Edit, Write or NotebookEdit), so finished work counts even when the reply does not mention it, and each edited file gets a yes/no on whether the request needed it; files that look unrelated are quoted so Claude reverts them or says why. Edits made through Bash or by Codex are not seen. Adds about 1 to 3 seconds and $0.00003 per turn; `/mynameisjev:status` shows how often it continued |
 | Tiebreak | `/mynameisjev:tiebreak on` | Lets Claude ask Jev to pick when it is choosing between 2 to 4 workable approaches mid-task, you stated no preference, and the choice is cheap to reverse. Claude uses the plugin's `jev-tiebreak` skill, which runs `decide` or `compare` and tells you in one line what Jev picked, so you can override it. It asks you instead about product, security, data, destructive, cost or public API choices. At most 2 calls per turn; `/mynameisjev:status` counts them |

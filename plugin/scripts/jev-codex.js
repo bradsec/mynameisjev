@@ -62,16 +62,20 @@ function readJson(file) {
   }
 }
 
+function runCommand(args) {
+  const script = path.join(__dirname, 'jev-codex-run.js').replace(/\\/g, '/').replace(/["`$]/g, '\\$&');
+  return `node "${script}" ${args}`;
+}
+
 // The companion task command with its prompt on stdin through a quoted
 // heredoc: as a quoted argument, quotes, backticks and $ in a multi-paragraph
 // brief break the command or get expanded by the shell. The companion reads
 // stdin before it starts a --background job. Forward slashes work in Git Bash
 // on Windows too.
-function taskCommand(companion, flags, placeholder) {
+function taskCommand(flags, placeholder) {
   let delimiter;
   do { delimiter = `JEV_BRIEF_${crypto.randomBytes(3).toString('hex')}`; } while (placeholder.split('\n').includes(delimiter));
-  const script = companion.replace(/\\/g, '/').replace(/["`$]/g, '\\$&');
-  return `jev_err=$(mktemp) || exit $?\nnode "${script}" task ${flags ? `${flags} ` : ''}2>"$jev_err" <<'${delimiter}'\n${placeholder}\n${delimiter}\njev_status=$?\nif [ "$jev_status" -eq 0 ]; then grep -F '[codex] Thread ready (' "$jev_err" | head -n 1 || :; else tail -n 20 "$jev_err" >&2; fi\nrm -f "$jev_err"\n(exit "$jev_status")`;
+  return runCommand(`${flags ? `${flags} ` : ''}<<'${delimiter}'\n${placeholder}\n${delimiter}`);
 }
 
 // Newest installed codex plugin's companion script, or null when the plugin
@@ -289,6 +293,7 @@ function tierChoice(tier, overrides, cache, explicit = false) {
 }
 
 module.exports = {
+  runCommand,
   taskCommand,
   codexAvailable,
   DEFAULT_TIERS,

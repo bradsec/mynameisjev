@@ -231,7 +231,13 @@ async function report(reportArgs = []) {
     console.log(`  ${model}: ${t.runs} tasks, input ${fmt(t.input)}, cached input ${fmt(t.cacheRead)}, output ${fmt(t.output)}, reasoning output ${fmt(t.reasoningOutput)}`);
   }
   if (!Object.keys(byModel).length) console.log('  none recorded yet');
-  if (unknown) console.log(`  unknown: ${unknown} tasks`);
+  if (unknown) {
+    // Why tasks found no Codex job (jev-handoff-ledger.js task.miss); older tasks have no reason.
+    const misses = {};
+    for (const task of tasks) if (!task.codex && task.miss) misses[task.miss] = (misses[task.miss] || 0) + 1;
+    const why = Object.entries(misses).sort((a, b) => b[1] - a[1]).map(([miss, n]) => `${miss} ${n}`).join(', ');
+    console.log(`  unknown: ${unknown} tasks${why ? ` (${why})` : ''}`);
+  }
   const overheadFields = (values) => `input ${fmt(values.input)}, cache write ${fmt(values.cacheWrite)}, cache read ${fmt(values.cacheRead)}, output ${fmt(values.output)}`;
   const overheadMean = Object.fromEntries(Object.entries(overhead).map(([key, value]) => [key, Math.round(value / overheadKnown)]));
   console.log(`Claude hand-off overhead: ${overheadKnown ? `total ${overheadFields(overhead)}; mean per hand-off ${overheadFields(overheadMean)} (${overheadKnown} measured)` : 'unknown'}`);
@@ -494,7 +500,7 @@ async function transferCommand([arg]) {
     return;
   }
   if (arg) throw new Error('usage: /mynameisjev:transfer [on | off]');
-  console.log(`Auto-transfer: ${onOff(state.autoTransfer)}. From 90% Claude usage, copies the session into a new Codex thread on every prompt and shows the codex resume command. usage: /mynameisjev:transfer [on | off]`);
+  console.log(`Auto-transfer: ${onOff(state.autoTransfer)}. From 90% Claude usage, copies the session into a new Codex thread (again at most every 10 minutes per session) and shows the codex resume command. usage: /mynameisjev:transfer [on | off]`);
 }
 
 async function updateCommand([arg]) {

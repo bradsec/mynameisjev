@@ -79,6 +79,12 @@ test('records read-only and network limits from Codex output', async () => {
   setState({});
   await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" result job-1' }, tool_response: { stdout: 'The filesystem is still read-only, so I cannot edit.' } });
   assert.ok(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).codexLimits.readonly);
+  for (const stdout of ['curl: (6) Could not resolve host: example.com', 'Error: getaddrinfo ENOTFOUND registry.npmjs.org', 'Temporary failure in name resolution']) {
+    setState({});
+    await watcher.watch({ tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" result job-1' }, tool_response: { stdout } });
+    assert.ok(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).codexLimits.network, stdout);
+  }
+  setState({});
   // A report that only mentions an error code is not a denial.
   setState({});
   await watcher.watch({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: 'jev-state.js retries on EPERM and EACCES' } });
@@ -98,6 +104,41 @@ test('marks when Codex\'s result is back for review fixes', async () => {
   await watcher.watch({ session_id: 's', tool_name: 'Bash', tool_input: { command: 'node "/p/codex-companion.mjs" result job-1' } });
   assert.strictEqual(read().reviewing, true, 'result read back');
 });
+
+for (const script of ['codex-companion.mjs', 'jev-codex-run.js']) {
+  for (const quote of ['', '"']) {
+    test(`${script} ${quote || 'unquoted'} result registers the job and opens review only when finished`, async () => {
+      setState({});
+      setUsage(10);
+      const command = `node ${quote}/p/${script}${quote}`;
+      const bash = (args, tool_response) => watcher.watch({ session_id: 's', tool_name: 'Bash',
+        tool_input: { command: `${command} ${args}` }, tool_response });
+      const read = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8'));
+      const jobs = path.join(claudeDir, 'plugins/data/codex-openai-codex/state/result-test');
+      fs.mkdirSync(jobs, { recursive: true });
+      fs.writeFileSync(path.join(jobs, 'state.json'), JSON.stringify({ jobs: [
+        { id: 'job-123', sessionId: 's', createdAt: '2000-01-01T00:00:00Z' },
+      ] }));
+      await watcher.watch({ session_id: 's', tool_name: 'Bash',
+        tool_input: { command: 'node "/p/jev-codex-run.js" --background' } });
+      for (const args of ['status job-123', 'result job-123']) {
+        assert.strictEqual(watcher.handOff({ tool_name: 'Bash', tool_input: { command: `${command} ${args}` } }), null);
+      }
+      await bash('status job-123', { stdout: 'running' });
+      await bash('result job-123', { stderr: 'Job job-123 is still running.' });
+      assert.strictEqual(read().routes.s.reviewing, false);
+      assert.strictEqual(read().stats.codexRuns, 1);
+      await bash('result job-123', { stdout: 'EROFS: read-only file system; network unreachable' });
+      const state = read();
+      assert.strictEqual(state.routes.s.reviewing, true);
+      assert.strictEqual(state.stats.codexRuns, 1);
+      assert.strictEqual(state.stats.codexReturns, 1);
+      assert.ok(state.codexLimits.readonly && state.codexLimits.network);
+      assert.ok(state.handoffLedger.s.tasks.some((task) => task.jobId === 'job-123'));
+      fs.rmSync(jobs, { recursive: true });
+    });
+  }
+}
 
 test('review: an unfinished result keeps the guard; counts returns, fixes and send-backs', async () => {
   setState({});
@@ -183,7 +224,7 @@ test('with Codex: hands off steps at 80%, auto-transfers at 90%', async () => {
   setUsage(81);
   const route = await watcher.watch(hookInput);
   assert.match(route.systemMessage, /hands self-contained steps to Codex/);
-  assert.match(route.hookSpecificOutput.additionalContext, /codex-companion\.mjs" task/);
+  assert.match(route.hookSpecificOutput.additionalContext, /jev-codex-run\.js"/);
   assert.match(route.hookSpecificOutput.additionalContext, /Tasks without --write are read-only/);
   const stepsRoute = JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'), 'utf8')).route;
   assert.deepStrictEqual([stepsRoute.target, stepsRoute.model, stepsRoute.how, stepsRoute.session], ['codex', 'steps', 'suggested', 's'], 'mid-turn crossing arms the edit guard');

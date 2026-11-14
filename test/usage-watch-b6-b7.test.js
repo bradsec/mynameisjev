@@ -55,6 +55,14 @@ test('B6: a real task still counts, with arguments or alone', async () => {
   assert.strictEqual(watcher.handOff(bash(`${companion} task\n--write "x"`))?.target, 'codex');
 });
 
+test('wrapper handoffs update routing and ledger, ignoring flags in the brief', async () => {
+  const command = 'node "/p/jev-codex-run.js" --write <<\'JEV_BRIEF_abcdef\'\nGoal: --background --model wrong\nJEV_BRIEF_abcdef';
+  assert.deepStrictEqual(watcher.handOff(bash(command)), { target: 'codex', model: 'default', reviewing: true });
+  assert.deepStrictEqual(await effects(command), { handOff: 'codex', codexRuns: 1, route: 'codex/ran', ledgerTasks: 1, editDenied: true });
+  assert.deepStrictEqual(watcher.handOff(bash('node "/p/jev-codex-run.js" --background --model gpt-6-sol')),
+    { target: 'codex', model: 'gpt-6-sol', reviewing: false });
+});
+
 // B7: Claude's mid-turn threshold note is per session; the user notice is
 // once per crossing. From here on Codex is available: enabled plugin, a
 // companion that answers `transfer`, and a codex executable on PATH (with
@@ -103,7 +111,7 @@ test('B7: a second session past the same crossing gets the hand-off note and rou
   const b = await toolCall('session-b');
   const route = st.routeFor(st.readState(), 'session-b');
   assert.ok(b && route, `session-b output: ${JSON.stringify(b)}, session-b route: ${JSON.stringify(route)}`);
-  assert.match(b.hookSpecificOutput.additionalContext, /codex-companion\.mjs" task/);
+  assert.match(b.hookSpecificOutput.additionalContext, /jev-codex-run\.js"/);
   assert.deepStrictEqual([route.target, route.model, route.how], ['codex', 'steps', 'suggested']);
   assert.strictEqual(b.systemMessage, undefined, 'the user already saw this crossing');
   assert.strictEqual(await toolCall('session-a'), null, 'session-a is not told twice');

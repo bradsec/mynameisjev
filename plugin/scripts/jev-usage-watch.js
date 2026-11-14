@@ -57,7 +57,7 @@ const shellCommand = (hookInput) => {
 function handOff(hookInput) {
   const input = hookInput.tool_input || {};
   const command = shellCommand(hookInput);
-  if (/codex-companion\.mjs"?\s+task(?=\s|$)/.test(command)) {
+  if (/(?:codex-companion\.mjs"?\s+task|jev-codex-run\.js"?(?!\s+(?:status|result)(?=\s|$)))(?=\s|$)/.test(command.split('<<')[0])) {
     // Flags sit before the heredoc; the brief after it may mention them.
     const line = command.split('<<')[0];
     const model = line.match(/--model\s+"?([\w.-]+)/);
@@ -80,21 +80,21 @@ async function watch(hookInput) {
   const current = st.readState();
   if (!current.enabled) return null;
   const ran = handOff(hookInput);
+  const result = shellCommand(hookInput).match(/(?:codex-companion\.mjs|jev-codex-run\.js)"?\s+result(?=\s|$)(?:\s+([\w-]+))?/);
   if (hookInput.session_id && !hookInput.agent_id && (ran?.target === 'codex' ||
-      /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput)) && resultFinished(hookInput))) {
+      result && resultFinished(hookInput))) {
     try {
       const ledger = require('./jev-handoff-ledger');
-      const command = shellCommand(hookInput);
-      const resultId = command.match(/codex-companion\.mjs"?\s+result\s+([\w-]+)/)?.[1];
-      ledger.register(current, hookInput, resultId, ran?.target === 'codex' ? ran.reviewing : true);
+      ledger.register(current, hookInput, result?.[1], ran?.target === 'codex' ? ran.reviewing : true);
       st.writeState(current);
     } catch (_) { /* Accounting never interrupts a tool call. */ }
   }
-  if (ran?.target === 'codex' || /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput))) {
+  if (ran?.target === 'codex' || result) {
     const output = JSON.stringify(hookInput.tool_response || '');
     // Denial wording only: bare EPERM/EACCES also show up in code Codex reports on.
     const readonly = /EROFS|read-only file ?system|(?:sandbox|workspace|filesystem) is (?:still )?read-only/i.test(output);
-    const network = /network unreachable|ENETUNREACH|EHOSTUNREACH/i.test(output);
+    // DNS failures are how a sandbox without network usually shows up.
+    const network = /network unreachable|ENETUNREACH|EHOSTUNREACH|getaddrinfo (?:ENOTFOUND|EAI_AGAIN)|Could not resolve host|Temporary failure in name resolution/i.test(output);
     if (readonly) current.codexLimits.readonly = new Date().toISOString();
     if (network) current.codexLimits.network = new Date().toISOString();
     if (readonly || network) {
@@ -122,7 +122,7 @@ async function watch(hookInput) {
   // A background task's result read back: review fixes may start.
   const route = before;
   if (!ran && route && route.target === 'codex' && route.session && !route.reviewing &&
-      /codex-companion\.mjs"?\s+result\b/.test(shellCommand(hookInput)) && resultFinished(hookInput)) {
+      result && resultFinished(hookInput)) {
     st.putRoute(current, { ...route, reviewing: true });
     if (reviewOn) current.stats.codexReturns = (current.stats.codexReturns || 0) + 1;
     try { st.writeState(current); } catch (e) { /* the edit guard stays on for this one */ }

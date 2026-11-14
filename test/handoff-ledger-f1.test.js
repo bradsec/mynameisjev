@@ -34,9 +34,11 @@ test('matches foreground job before tool_result reaches transcript', () => {
     { type: 'tool_use', id: 'tu1', name: 'Bash' },
   ] } };
   fs.writeFileSync(transcript, JSON.stringify(toolUse) + '\n');
-  const fakeCompanion = path.join(home, 'codex-companion.mjs');
+  const scripts = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins/cache/openai-codex/codex/1.0.0/scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  const fakeCompanion = path.join(scripts, 'codex-companion.mjs');
   fs.writeFileSync(fakeCompanion, `process.stdout.write('Task finished.\\n');\nprocess.stderr.write('[codex] Thread ready (${threadId}).\\n[codex] Thread ready (${threadId}).\\n');\n`);
-  const output = execFileSync('sh', ['-c', taskCommand(fakeCompanion, '', 'brief')],
+  const output = execFileSync('sh', ['-c', taskCommand('', 'brief')],
     { encoding: 'utf8', env: process.env });
   assert.equal(output, `Task finished.\n[codex] Thread ready (${threadId}).\n`);
   const state = {};

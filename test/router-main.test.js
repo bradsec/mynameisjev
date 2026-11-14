@@ -155,11 +155,11 @@ test('the Jev request asks the effort question with four levels', () => {
   assert.strictEqual(q.criteria.length, 4);
 });
 
-test('eligible prompts send seven questions, eight with prior context; skipped prompts send none', () => {
+test('eligible prompts send eight questions, nine with prior context; skipped prompts send none', () => {
   const first = run('Write a short email to my landlord about the faucet.');
-  assert.strictEqual(Object.keys(first.bodies[0].questions).length, 7);
+  assert.strictEqual(Object.keys(first.bodies[0].questions).length, 8);
   const next = run('Now revise that email to mention the leaking pipe.', { keepState: true });
-  assert.strictEqual(Object.keys(next.bodies[0].questions).length, 8);
+  assert.strictEqual(Object.keys(next.bodies[0].questions).length, 9);
   assert.strictEqual(run('/mynameisjev:status').bodies.length, 0);
 });
 
@@ -296,7 +296,7 @@ test('classifier Astra with Codex available routes to the frontier model and cou
     assert.strictEqual(r.bodies.length, 1);
     assert.deepStrictEqual([r.state.route.target, r.state.route.model, r.state.route.how], ['codex', 'gpt-6-astra', 'suggested']);
     assert.match(r.out.hookSpecificOutput.additionalContext, /The user explicitly requested this model.*Route it to Codex/s);
-    assert.match(r.out.hookSpecificOutput.additionalContext, /task --model gpt-6-astra --effort high/);
+    assert.match(r.out.hookSpecificOutput.additionalContext, /jev-codex-run\.js" --model gpt-6-astra --effort high/);
     assert.strictEqual(r.out.systemMessage, undefined);
     assert.strictEqual(r.state.stats.codex, 1);
     assert.strictEqual(r.state.stats.forced, 0);

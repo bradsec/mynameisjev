@@ -67,7 +67,7 @@ test('route: with Codex, self-contained coding goes to Codex', () => {
   const r = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk }));
   assert.strictEqual(r.codex, true);
   assert.match(r.note, /Route it to Codex/);
-  assert.match(r.note, /codex-companion\.mjs" task --model gpt-6.1-sol --effort medium/);
+  assert.match(r.note, /jev-codex-run\.js" --model gpt-6.1-sol --effort medium/);
 });
 
 test('route: busy Codex falls back to Claude', () => {
@@ -168,31 +168,35 @@ test('prefer codex: tiny jobs stay on Claude, and a busy Codex falls back', () =
 
 test('codex notes: Claude writes the brief, has the final say, and reviews when on', () => {
   const on = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true }));
-  assert.match(on.note, /senior developer with the final say/);
+  assert.match(on.note, /You have final say/);
   assert.match(on.note, /Goal; Context .*Done when; Verify with/);
-  assert.match(on.note, /Verify with \(the test or check to run and its expected result\)/);
-  assert.match(on.note, /checks it ran with their results, saying plainly if a check failed or was skipped/);
-  assert.match(on.note, /every changed hunk traces to the brief; reject out-of-scope changes/);
+  assert.match(on.note, /Verify with \(check and expected result\)/);
+  assert.match(on.note, /checks and results \(including failed or skipped\)/);
+  assert.match(on.note, /each hunk must trace to the brief; reject out-of-scope changes/);
   assert.match(on.note, /read what new tests assert/);
-  assert.match(on.note, /After two send-backs on the same task, stop and report to the user/);
-  assert.match(on.note, /task --model \S+ --effort \S+ 2>"\$jev_err" <<'(JEV_BRIEF_[a-f0-9]+)'\n<the brief>\n\1\n/, 'brief goes on stdin, not as a quoted argument');
+  assert.match(on.note, /After two send-backs per task, stop and report to the user/);
+  assert.match(on.note, /jev-codex-run\.js" --model \S+ --effort \S+ <<'(JEV_BRIEF_[a-f0-9]+)'\n<the brief>\n\1\n/, 'brief goes on stdin, not as a quoted argument');
   assert.match(on.note, /token-efficiently/);
   assert.match(on.note, /installed skills .*fit/);
   assert.doesNotMatch(on.note, /ponytail|superpowers|caveman/i, 'no plugin or skill names');
   assert.match(on.note, /Notes for the lead/);
+  const run = on.note.match(/node "[^"]+\/jev-codex-run\.js"/)[0];
+  assert.ok(on.note.includes(`${run} status <job-id>`));
+  assert.ok(on.note.includes(`${run} result <job-id>`));
   assert.match(on.note, /conflicts with the code, .*report/);
   assert.match(on.note, /--resume-last/);
-  assert.match(on.note, /Weigh its Notes for the lead/);
-  assert.match(on.note, /Work token-efficiently yourself too/, 'Claude is held to it as well');
-  assert.match(on.note, /saves tokens without lowering the quality/);
-  assert.match(on.note, /git diff --stat/);
+  assert.match(on.note, /Weigh Notes for the lead/);
+  assert.match(on.note, /Keep your own brief and replies short/, 'Claude is held to it as well');
+  assert.match(on.note, /only for material risks, disagreements or suggestions/);
+  assert.match(on.note, /Never omit failed\/skipped checks, blockers or uncertainty/);
+  assert.match(on.note, /Review the diff the wrapper prints after --write tasks \(git diff only for background tasks or a cut diff\)/);
   assert.match(on.note, /without --write are read-only/);
-  assert.match(on.note, /tests using temp dirs, builds/);
-  assert.match(on.note, /read-only thread stays read-only on --resume-last/);
+  assert.match(on.note, /temp-dir tests, builds/);
+  assert.match(on.note, /--resume-last keeps a read-only thread read-only/);
   assert.match(on.note, /latest completed task in this session/);
   assert.match(on.note, /another task is in flight or finished later, start fresh with a self-contained brief/);
   assert.match(on.note, /run the final relevant check yourself/);
-  assert.match(on.note, /Tell Codex not to retry or work around sandbox, permission or network denials/);
+  assert.match(on.note, /do not retry or work around sandbox, permission or network denials/);
   assert.match(on.note, /explicitly asks you \(Claude\) to do the work yourself, do it here/);
   const off = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: false }));
   assert.match(off.note, /final say/);
@@ -222,7 +226,7 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
   assert.match(steps(true), /exception is small fixes while reviewing/);
   assert.match(steps(true), /final say/);
   assert.match(steps(true), /do it here instead/);
-  assert.match(steps(true), /task 2>"\$jev_err" <<'JEV_BRIEF_[a-f0-9]+'/);
+  assert.match(steps(true), /jev-codex-run\.js" <<'JEV_BRIEF_[a-f0-9]+'/);
   assert.doesNotMatch(steps(true), /"<the brief>"/);
   assert.doesNotMatch(steps(false), /small fixes/);
   assert.match(steps(false), /Do not make edits yourself/);
@@ -230,21 +234,28 @@ test('codex notes: sub-step note allows review fixes only with review on', () =>
 
 test('codex notes: full guidance once per session, then a short pointer', () => {
   const note = (over) => router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review: true, ...over })).note;
-  // Length without the companion's location, which is this run's temp dir:
-  // the bound is on the note's own text, not on how long os.tmpdir() is.
-  const size = (text) => text.split(tmp).join('').split(tmp.replace(/\\/g, '/')).join('').length;
+  // Bound the note text independently of the plugin's installation path.
+  const size = (text) => text.replace(/node "[^"\n]+"/g, 'node "<script>"').length;
   const short = note({ guided: true });
   assert.match(short, /Same Codex rules as earlier this session/);
-  assert.match(short, /codex-companion\.mjs" task/, 'still has the command');
+  assert.match(short, /jev-codex-run\.js"/, 'still has the command');
   assert.match(short, /--model .*--effort/);
   assert.match(short, /--write/);
   assert.doesNotMatch(short, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|Notes for the lead|explicitly asks you/);
-  assert.match(short, /codex-companion\.mjs/);
+  assert.match(short, /jev-codex-run\.js/);
   assert.ok(size(short) < 680, `short note is ${size(short)} characters`);
   const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true, review: true, guided: true })).note;
   assert.match(steps, /Same Codex rules as earlier this session/);
   assert.doesNotMatch(steps, /Keep the brief|Tasks without --write|For a follow-up|git diff --stat|exception is small fixes/);
   assert.ok(size(steps) < 680, `steps note is ${size(steps)} characters`);
+});
+
+test('first notes stay bounded with review on and off', () => {
+  for (const review of [false, true]) {
+    const note = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk, review })).note;
+    const normalized = note.replace(/node "[^"\n]+"/g, 'node "<script>"');
+    assert.ok(normalized.length < (review ? 2900 : 2400), `${review}: ${normalized.length} characters`);
+  }
 });
 
 test('first full Codex note names project instructions, later note stays short', () => {
@@ -298,7 +309,7 @@ test('override: tier and claude notes', () => {
 
 test('override: codex routes with the asked size, even when Codex looks busy', () => {
   const r = router.overrideAdvice(router.parseOverride('+codex:tiny x'), ctx({ codexNow: codexOk }));
-  assert.match(r.note, /task --model gpt-6-luna --effort low/);
+  assert.match(r.note, /jev-codex-run\.js" --model gpt-6-luna --effort low/);
   assert.deepStrictEqual(r.route, ['codex', 'gpt-6-luna', 'suggested']);
   assert.strictEqual(r.notice, null);
   const busy = router.overrideAdvice(router.parseOverride('+codex x'), ctx({ codexNow: codexBusy }));
@@ -326,7 +337,7 @@ test('explicit Fable uses a general-purpose Agent or the Fable session', () => {
 test('explicit Astra uses the frontier tier even with a saved hardest override', () => {
   for (const prefix of ['+astra', '+codex:astra']) {
     const r = router.overrideAdvice(router.parseOverride(`${prefix} fix it`), ctx({ codexNow: codexOk, overrides: { hardest: { model: 'gpt-6.1-sol' } } }));
-    assert.match(r.note, /task --model gpt-6-astra --effort high/);
+    assert.match(r.note, /jev-codex-run\.js" --model gpt-6-astra --effort high/);
     assert.deepStrictEqual(r.route, ['codex', 'gpt-6-astra', 'suggested']);
   }
   assert.match(router.overrideAdvice(router.parseOverride('+astra fix it'), ctx()).notice, /Codex is not available/);
@@ -510,4 +521,31 @@ test('codex model notice: silent on the first list and when nothing changed, nam
   assert.match(next.text, /^Jev: Codex's model list changed: tiny now uses gpt-7-luna \(was gpt-6-luna\)\./);
   assert.doesNotMatch(next.text, /everyday/);
   assert.match(next.text, /\/mynameisjev:codex/);
+});
+
+test('web work is not handed to Codex whole', () => {
+  const r = router.routeAdvice('large', result({ size: 'large', coding: 0.9, web: 0.9 }), ctx({ codexNow: codexOk, preferCodex: true, sessionFamily: 'sonnet' }));
+  assert.notStrictEqual(r.codex, true);
+  assert.match(r.note, /mynameisjev:large/);
+  const steps = router.routeAdvice('large', result({ size: 'large', contained: 0.1 }), ctx({ codexNow: codexOk, preferCodex: true })).note;
+  assert.match(steps, /do web search, URL fetches and downloads yourself/);
+  assert.doesNotMatch(steps, /research step/);
+});
+
+test('unsized messages get the sub-step note only for coding or heavy work that is not tiny', () => {
+  assert.strictEqual(router.unsureHasSteps(result({ coding: 0.1, heavy: 0.1 })), false);
+  assert.strictEqual(router.unsureHasSteps(result({ coding: 0.9 })), true);
+  assert.strictEqual(router.unsureHasSteps(result({ heavy: 0.9 })), true);
+  assert.strictEqual(router.unsureHasSteps(result({ size: 'tiny', coding: 0.9 })), false);
+  assert.strictEqual(router.unsureHasSteps(result({ size: 'tiny', heavy: 0.9 })), true);
+  assert.strictEqual(router.unsureHasSteps(result({ coding: null, heavy: null })), false);
+});
+
+test('auto-transfer runs again only after ten minutes in the same session', () => {
+  const now = Date.parse('2026-11-15T12:00:00Z');
+  const at = (min) => ({ lastTransfer: { at: new Date(now - min * 60000).toISOString(), session: 's1' } });
+  assert.strictEqual(router.transferredRecently(at(5), 's1', now), true);
+  assert.strictEqual(router.transferredRecently(at(11), 's1', now), false);
+  assert.strictEqual(router.transferredRecently(at(5), 's2', now), false);
+  assert.strictEqual(router.transferredRecently({}, 's1', now), false);
 });

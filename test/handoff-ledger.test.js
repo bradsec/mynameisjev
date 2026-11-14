@@ -106,4 +106,25 @@ test('ambiguous job window stays unknown', () => {
   const state = {};
   ledger.register(state, { session_id: 'parallel', transcript_path: transcript, tool_use_id: 'call-2' });
   assert.equal(state.handoffLedger.parallel.tasks[0].jobId, null);
+  assert.equal(state.handoffLedger.parallel.tasks[0].miss, '2 jobs in the window');
+});
+
+test('a task without a job records why, and Stop with nothing pending skips the transcript', () => {
+  const state = {};
+  ledger.register(state, { session_id: 'nowindow', transcript_path: path.join(home, 'missing.jsonl'), tool_use_id: 'x' });
+  assert.equal(state.handoffLedger.nowindow.tasks[0].miss, 'no tool window in transcript');
+  state.handoffLedger.nowindow.tasks[0].done = true;
+  // Reading the (readable) transcript would recompute the totals.
+  state.handoffLedger.nowindow.totals = 'kept';
+  ledger.finish(state, { session_id: 'nowindow', transcript_path: path.join(home, 'transcript.jsonl') });
+  assert.equal(state.handoffLedger.nowindow.totals, 'kept');
+});
+
+test('the report gives the reasons tasks found no Codex job', () => {
+  const dataDir = path.join(process.env.CLAUDE_CONFIG_DIR, 'mynameisjev');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const tasks = [{ miss: 'no job in the window' }, { miss: 'no job in the window' }, { miss: '2 jobs in the window' }, {}];
+  fs.writeFileSync(path.join(dataDir, 'state.json'), JSON.stringify({ enabled: true, handoffLedger: { m: { at: 1, tasks } } }));
+  const output = execFileSync(process.execPath, [path.join(__dirname, '../plugin/scripts/jev-cli.js'), 'report'], { encoding: 'utf8' });
+  assert.match(output, /unknown: 4 tasks \(no job in the window 2, 2 jobs in the window 1\)/);
 });

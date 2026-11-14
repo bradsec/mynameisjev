@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- Codex hand-offs run through a new wrapper, `jev-codex-run.js`, so each
+  routed command is a short `node ... <<'JEV_BRIEF_x'` call instead of a
+  shell snippet. The wrapper also runs `status` and `result` for background
+  jobs.
+- After a foreground `--write` task, the wrapper prints the files the task
+  changed and their diff (cut at 12,000 characters), so review needs no
+  separate `git diff` calls. Files already dirty before the task are left out.
+- The first Codex note is about 26% shorter. Codex and the helper subagents
+  add Notes for the lead only when they have something material, and still
+  report failed or skipped checks, blockers and uncertainty.
+- Sizing criteria now include coding examples, so a one-file fix or small
+  feature can size as EVERYDAY.
+- Jev now asks whether a task needs the web. Web work is not handed to
+  Codex whole, since its sandbox may have no network, and the sub-step note
+  tells Claude to do web steps itself.
+- In prefer-Codex mode or with Claude low, a message Jev could not size gets
+  the sub-step note only for coding or heavy work that is not a likely tiny
+  job.
+- Network-denial detection now catches DNS failures such as
+  `Could not resolve host` and `getaddrinfo ENOTFOUND`.
+- Auto-transfer copies a session into Codex again at most every 10 minutes,
+  instead of on every prompt past 90%.
+- The hand-off ledger records why a task found no Codex job, and
+  `/mynameisjev:report` lists the reasons. The Stop hook no longer reads the
+  transcript when no hand-off is waiting to be settled.
+
 ## 0.3.30
 
 - Codex briefs now ask for each check's expected result, and Codex reports

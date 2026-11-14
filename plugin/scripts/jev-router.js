@@ -11,7 +11,8 @@
 // or any self-contained work once Claude's plan usage passes CLAUDE_ROUTE_PCT,
 // goes to a Codex model picked by size (jev-codex.js), while Codex has
 // headroom. Near Claude's limit the user is told about /codex:transfer, and
-// from AUTO_TRANSFER_PCT the router runs the transfer itself on every prompt.
+// from AUTO_TRANSFER_PCT the router runs the transfer itself, at most once
+// per AUTO_TRANSFER_EVERY_MS in each session.
 //
 // A leading "+tiny", "+everyday", "+large", "+hardest", "+codex[:<size>]" or
 // "+claude" on a message routes it without a Jev call (see parseOverride).
@@ -53,13 +54,22 @@ const claudeLimitsPath = path.join(st.dataDir, 'claude-limits.json');
 // 100% Claude can't act at all, not even to hand work over.
 const CLAUDE_ROUTE_PCT = 80;
 const CLAUDE_TRANSFER_PCT = 85;
-// From here the router copies the session into Codex on every prompt (and
+// From here the router copies the session into Codex (at most every 10 minutes per session, and
 // the usage watch once mid-turn), so an up-to-date `codex resume` target
 // exists when Claude stops answering.
 const AUTO_TRANSFER_PCT = 90;
 // Runs alongside the Jev call inside the 5s hook timeout; a 2.3MB transcript
 // transfers in about 0.4s.
 const TRANSFER_TIMEOUT_MS = 4000;
+// Each transfer holds up a prompt and leaves another Codex thread, so a session
+// past AUTO_TRANSFER_PCT is copied again only after this long. The last copy's
+// resume command stays valid in the meantime.
+const AUTO_TRANSFER_EVERY_MS = 10 * 60 * 1000;
+const transferredRecently = (state, sessionId, now = Date.now()) => {
+  const last = state.lastTransfer;
+  const at = last && Date.parse(last.at);
+  return Boolean(last && sessionId && last.session === sessionId && Number.isFinite(at) && now - at < AUTO_TRANSFER_EVERY_MS);
+};
 // Codex usage above which Codex stops taking routed work.
 const CODEX_MAX_PCT = 85;
 // Older Codex caches are not trusted for routing (background refresh runs
@@ -370,6 +380,7 @@ function routeAdvice(tier, result, ctx) {
   const contained = result.contained !== null && result.contained >= NOUL_THRESHOLD;
   const heavy = result.heavy !== null && result.heavy >= NOUL_THRESHOLD;
   const coding = result.coding !== null && result.coding >= NOUL_THRESHOLD;
+  const web = needsWeb(result);
 
   // The user asked Claude itself to do it: no hand-off, and with no Codex
   // route the edit guard (jev-codex-steps.js) stays off.
@@ -386,7 +397,9 @@ function routeAdvice(tier, result, ctx) {
     if (tier === 'tiny' && !heavy) return { suppress: 'tiny: hand-off costs more than it saves' };
     return { note: subStepAdvice(ctx.claudeLow ? ctx.claude : null, companion, opts), codex: true, model: 'steps' };
   }
-  if (contained && ctx.codexNow.ok && companion && (codexFirst || coding)) {
+  // Web work handed to Codex whole fails in a sandbox without network and
+  // costs a round trip; a Claude helper (large, hardest) has web search.
+  if (contained && !web && ctx.codexNow.ok && companion && (codexFirst || coding)) {
     // Same start-up argument as for Claude helpers: a one-line job is
     // cheaper done in place than handed off.
     if (tier === 'tiny' && !heavy) return { suppress: 'tiny: hand-off costs more than it saves' };
@@ -403,6 +416,14 @@ function routeAdvice(tier, result, ctx) {
 }
 
 const askedClaude = (result) => result.self !== null && result.self !== undefined && result.self >= NOUL_THRESHOLD;
+// An unsized message gets the sub-step note only when it is coding or heavy
+// work and not a likely tiny job: the confident path (routeAdvice) suppresses
+// tiny jobs too, and other work has no steps for Codex.
+const unsureHasSteps = (result) => {
+  const over = (v) => v !== null && v !== undefined && v >= NOUL_THRESHOLD;
+  return (over(result.coding) || over(result.heavy)) && !(result.size === 'tiny' && !over(result.heavy));
+};
+const needsWeb = (result) => result.web !== null && result.web !== undefined && result.web >= NOUL_THRESHOLD;
 
 // Note for Claude when its plan usage is high but the message can't go to
 // Codex whole: keep coordinating here, send the self-contained steps there.
@@ -412,11 +433,12 @@ function subStepAdvice(claude, companion, { review, guided, codexLimits, cwd } =
   const why = claude
     ? `Jev: Claude ${claude.window} usage is at ${Math.round(claude.pct)}% (resets ${fmtReset(claude.resetsAt, claude.window === '7d')}).${paceText(claude)} `
     : 'Jev: prefer-Codex mode is on. ';
-  if (guided) return `${why}Delegate steps to Codex:\n${taskCommand(companion, '')}\n` +
+  if (guided) return `${why}Delegate steps to Codex:\n${taskCommand('')}\n` +
     `Flags: --model, --effort, --write as needed. ${limitLine(codexLimits)}Same Codex rules as earlier this session.`;
   return why +
-    'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run, search and research step to Codex ' +
-    `with one Bash call:\n${taskCommand(companion, '')}\n${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}` +
+    'Delegate without asking: keep only coordination and decisions here. Send every file edit, test run and code search to Codex; ' +
+    'do web search, URL fetches and downloads yourself, since Codex\'s sandbox may have no network. Send the rest ' +
+    `with one Bash call:\n${taskCommand('')}\n${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}` +
     `${brief()}\n${projectInstructionNote(cwd)}` +
     (review
       ? 'Do not do the work yourself, whether with Edit/Write or through Bash (sed -i, file-writing heredocs, scripts); batch small edits into one Codex task. ' +
@@ -462,7 +484,7 @@ function limitNoticeFor(claude, codexNow, autoTransferOn) {
   let text = head;
   if (level === 'transfer') {
     if (!codexNow.available) text = `${head} Close to the limit.`;
-    else if (autoTransferOn) text = `${head} Close to the limit. From ${AUTO_TRANSFER_PCT}% Jev copies this session into Codex on every prompt and shows the \`codex resume\` command; run /codex:transfer to do it now.`;
+    else if (autoTransferOn) text = `${head} Close to the limit. From ${AUTO_TRANSFER_PCT}% Jev copies this session into Codex (again at most every 10 minutes) and shows the \`codex resume\` command; run /codex:transfer to do it now.`;
     else text = `${head} Close to the limit: run /codex:transfer to continue this session in Codex.`;
   } else if (codexNow.available) {
     text = codexNow.ok ? `${head} Routing self-contained work to Codex until the reset.` : `${head} Codex can't take work, so it stays on Claude.`;
@@ -545,41 +567,36 @@ function codexAdvice(tier, result, reason, choice, companion, opts) {
 // writes the brief, has the final say on the result and, with review on,
 // checks it. The user's message alone leaves Codex
 // without the conversation's context.
-const BRIEF = 'You are the senior developer with the final say, and Codex is a developer on your team: ' +
-  'what it returns is a proposal you accept, fix or reject. Do not pass the user\'s message through as is. ' +
-  'Write Codex a short brief: Goal; Context (the files, decisions and findings from this conversation it needs); ' +
-  'Constraints (style, scope, what not to touch); Done when; Verify with (the test or check to run and its expected result). ' +
-  'Tell Codex to work token-efficiently (read only what it needs, terse report), to use whichever of its installed skills fit ' +
-  'the task (for example ones for the simplest solution, test-first work, debugging or terse output) and any other that ' +
-  'saves tokens without lowering the quality of the work, and to end with the files it changed, the checks it ran with their results, saying plainly if a check failed or was skipped, and ' +
-  'Notes for the lead: risks, anything in the brief it disagrees with, and suggestions. If the brief conflicts with the ' +
-  'code, Codex should stop and report the conflict instead of guessing. Work token-efficiently yourself too: keep the brief ' +
-  'and your replies short, read only what you need, and use your own installed skills that fit, especially ones that cut ' +
-  'tokens without lowering the quality of the work. Tell Codex not to retry or work around sandbox, permission or network denials, but to report them as blocked.';
+const BRIEF = 'You have final say: accept, fix or reject Codex\'s proposal. Do not pass the user\'s message through as is. ' +
+  'Write a short brief: Goal; Context (needed files, decisions, findings); Constraints (style, scope, exclusions); ' +
+  'Done when; Verify with (check and expected result). Tell Codex to work token-efficiently, read only what it needs, ' +
+  'and use installed skills that fit (simple solutions, test-first, debugging, terse output). ' +
+  'End report: files changed; checks and results (including failed or skipped); Notes for the lead only for material risks, disagreements or suggestions. ' +
+  'Never omit failed/skipped checks, blockers or uncertainty. If the brief conflicts with the code, stop and report. ' +
+  'Tell Codex: do not retry or work around sandbox, permission or network denials; report blocked. ' +
+  'Keep your own brief and replies short; read only what you need and use fitting installed skills.';
 const RTK_BRIEF = 'RTK is installed: tell Codex to prefix its shell commands with rtk (for example rtk git status) to cut command output.';
 // The brief text, with the RTK line only when the rtk CLI is on PATH: Codex
 // has no hook to add the prefix for it.
 const brief = () => (sync.rtkBinary() ? `${BRIEF} ${RTK_BRIEF}` : BRIEF);
-const REVIEW = 'When Codex returns, review its work cheaply: read git diff --stat and the diff of the changed files only, ' +
-  'not whole files; check that every changed hunk traces to the brief; reject out-of-scope changes; read what new tests assert; and run the final relevant check yourself. ' +
-  'Weigh its Notes for the lead: act on each or tell the user why not. ' +
-  'Fix small issues yourself (about 10 lines or fewer); send anything larger back to Codex as a follow-up brief with --resume-last. ' +
-  'After two send-backs on the same task, stop and report to the user instead of sending it back again. ' +
-  'Then tell the user the outcome in one or two lines.';
+const REVIEW = 'Review the diff the wrapper prints after --write tasks (git diff only for background tasks or a cut diff), not whole files: ' +
+  'each hunk must trace to the brief; reject out-of-scope changes; read what new tests assert; run the final relevant check yourself. ' +
+  'Weigh Notes for the lead: act on each or tell the user why not. ' +
+  'Fix issues of about 10 lines or fewer yourself; otherwise send back with --resume-last. ' +
+  'After two send-backs per task, stop and report to the user. Give a one- or two-line outcome.';
 const DIRECT_ASK = 'If the user\'s message explicitly asks you (Claude) to do the work yourself, do it here instead.';
 // After the first Codex note of a session (or since its last compaction) the
 // full brief and review text is already in Claude's context, so later notes
 // only point back to it (st.guidedFor).
 
-const taskCommand = (companion, flags) => codex.taskCommand(companion, flags, '<the brief>');
-const STDIN_RULE = 'Keep the brief in the quoted heredoc as shown, never as a quoted argument, and put extra flags before <<.';
-const SANDBOX_RULE = 'Tasks without --write are read-only; add --write for checks that write (tests using temp dirs, builds). A read-only thread stays read-only on --resume-last; start a fresh --write task.';
+const taskCommand = (flags) => codex.taskCommand(flags, '<the brief>');
+const STDIN_RULE = 'Keep the brief in the quoted heredoc, never an argument; put flags before <<. The wrapper runs companion task.';
+const SANDBOX_RULE = 'Tasks without --write are read-only; add --write for writing checks (temp-dir tests, builds). --resume-last keeps a read-only thread read-only; start fresh with --write. Codex may have no network: keep web steps here.';
 const limitLine = (limits) => (limits?.readonly ? 'Codex recently hit a read-only sandbox: pass --write for checks that write. ' : '') +
-  (limits?.network ? 'Codex recently hit a network denial: report blocked commands without retrying. ' : '');
+  (limits?.network ? 'Codex recently hit a network denial: do web steps yourself, and tell Codex to report blocked commands without retrying. ' : '');
 // The companion resumes the latest Codex task thread of this Claude session.
-const RESUME_RULE = 'For a follow-up to the last Codex task (a fix, a send-back, an answer to its notes) add --resume-last, ' +
-  'so Codex continues in the same thread with its context; without it each task starts a new thread. ' +
-  'It picks the latest completed task in this session; if another task is in flight or finished later, start fresh with a self-contained brief.';
+const RESUME_RULE = 'Follow-ups (fixes, send-backs, answers to notes): --resume-last keeps context in the latest completed task in this session. ' +
+  'Without it, tasks start new threads. If another task is in flight or finished later, start fresh with a self-contained brief.';
 const projectInstructionNote = (cwd) => {
   const project = sync.projectInstructions(cwd);
   return project.readsProject ? `${project.line}. Claude can omit those project rules from the brief.\n` : '';
@@ -592,16 +609,16 @@ function codexCall(choice, companion, { review, guided, codexLimits, cwd } = {})
     choice.model ? `--model ${choice.model}` : null,
     choice.effort ? `--effort ${choice.effort}` : null,
   ].filter(Boolean).join(' ');
-  if (guided) return `with one Bash call:\n${taskCommand(companion, flags)}\n` +
+  if (guided) return `with one Bash call:\n${taskCommand(flags)}\n` +
     `Flags: --model, --effort, --write as needed. ${limitLine(codexLimits)}Same Codex rules as earlier this session.`;
   return 'with one Bash call from this conversation, not the codex:codex-rescue agent (that agent runs on Claude):\n' +
     // Forward slashes work in Git Bash on Windows too.
-    `${taskCommand(companion, flags)}\n` +
+    `${taskCommand(flags)}\n` +
     `${brief()}\n${projectInstructionNote(cwd)}` +
     `${STDIN_RULE} ${SANDBOX_RULE} ${RESUME_RULE} ${limitLine(codexLimits)}For long multi-step work add --background; it prints a job ID. ` +
     'Then, if the Monitor tool is available, run this with it to get Codex\'s progress as it works (it exits when the job ends):\n' +
     `node "${path.join(__dirname, 'jev-codex-jobs.js').replace(/\\/g, '/')}" watch <job-id>\n` +
-    'Otherwise check it later with the companion\'s status command. Either way, read the final output with its result <job-id> command.' +
+    `Otherwise check with ${codex.runCommand('status <job-id>')}. Read final output with ${codex.runCommand('result <job-id>')}.` +
     (review ? `\n${REVIEW}` : '');
 }
 
@@ -702,9 +719,9 @@ async function classify(prompt, previous, apiKey) {
       type: 'choice',
       instructions: "What's the smallest job size the message needs?",
       criteria: {
-        tiny: 'a lookup, a rename, a one-line answer',
-        everyday: 'a normal email, post, or short document',
-        large: 'a multi-step build, research, or a full report',
+        tiny: 'a lookup, a rename, a one-line answer or a one-line code change',
+        everyday: 'a normal email, post, or short document; a one-file code fix or a small feature',
+        large: 'a multi-file build or change, a broad investigation, research, or a full report',
         hardest: 'strategy, or anything where a wrong call is expensive',
       },
     },
@@ -722,6 +739,16 @@ async function classify(prompt, previous, apiKey) {
       criteria: {
         true: 'many reads, searches, or long command output along the way',
         false: 'a direct answer or a small, targeted change',
+      },
+    },
+    // Codex runs read-only by default and its sandbox may have no network, so
+    // web work stays with Claude or a Claude helper (routeAdvice).
+    web: {
+      type: 'noul',
+      instructions: 'Does the task need the internet: web search, fetching URLs, or cloning or downloading from the network?',
+      criteria: {
+        true: 'it needs web search, a URL fetch, or a network download',
+        false: 'local files, code, and knowledge are enough',
       },
     },
     coding: {
@@ -785,6 +812,7 @@ async function classify(prompt, previous, apiKey) {
     contained: noul('contained'),
     heavy: noul('heavy'),
     coding: noul('coding'),
+    web: noul('web'),
     self: noul('self'),
     model: asked ? model.choice : 'none',
     effort: effortLevel(data.answers.effort && data.answers.effort.score),
@@ -809,7 +837,7 @@ module.exports = {
   TIER_INFO, MODEL_RANK, modelFamily, transcriptModel, delegationAdvice,
   routeAdvice, limitKey, limitNoticeFor, modelChangeNotice, looksSkippable, subStepAdvice, parseOverride, overrideAdvice, askedClaude,
   coldCache, coldGuardReason, modelStreak, effortLevel, effortStreak, sessionEffort,
-  claudePeak, claudeLow, paceText, codexStatus, autoTransfer, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
+  claudePeak, claudeLow, paceText, codexStatus, autoTransfer, transferredRecently, unsureHasSteps, fmtReset, recordTransfer, transferNotice, readState, writeState, setRoute,
   THRESHOLDS: { route: CLAUDE_ROUTE_PCT, transfer: CLAUDE_TRANSFER_PCT, auto: AUTO_TRANSFER_PCT, codexMax: CODEX_MAX_PCT },
 };
 
@@ -870,7 +898,7 @@ function main() {
         writeState(state);
       }
       // Started now so it runs alongside the Jev call; awaited in `finally`.
-      if (state.autoTransfer && codexNow.available && claude && claude.pct >= AUTO_TRANSFER_PCT && transcriptPath) {
+      if (state.autoTransfer && codexNow.available && claude && claude.pct >= AUTO_TRANSFER_PCT && transcriptPath && !transferredRecently(state, sessionId)) {
         transfer = autoTransfer(transcriptPath, sessionId, cwd);
       }
       const isLow = claudeLow(claude);
@@ -1047,9 +1075,9 @@ function main() {
           : !confident ? `${tier} with no confidence`
             : `${tier} at confidence ${result.confidence.toFixed(2)} (< 0.60)`);
         // Unsized work still runs on Claude; with Claude low, point its
-        // self-contained steps at Codex anyway.
+        // self-contained steps at Codex anyway, when it has some worth handing off.
         const companion = codex.companionPath();
-        if ((isLow || prefer === 'codex') && codexNow.ok && companion && !askedClaude(result)) {
+        if ((isLow || prefer === 'codex') && codexNow.ok && companion && !askedClaude(result) && unsureHasSteps(result)) {
           setRoute(state, 'codex', 'steps', 'suggested', sessionId);
           st.markGuided(state, sessionId, review);
           writeState(state);

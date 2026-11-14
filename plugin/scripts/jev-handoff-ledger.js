@@ -17,7 +17,8 @@ function tail(file) {
     const length = Math.min(size, TAIL_BYTES);
     const data = Buffer.alloc(length);
     fs.readSync(fd, data, 0, length, size - length);
-    return { buf: data, text: data.toString('utf8'), start: size - length, size };
+    // Decoded on first use: finish() only needs the bytes.
+    return { buf: data, get text() { return data.toString('utf8'); }, start: size - length, size };
   } finally { fs.closeSync(fd); }
 }
 
@@ -111,8 +112,10 @@ function readUsage(ledger, task) {
   settle(ledger, task.threadId);
 }
 
+// Returns { job, count }: count is how many jobs matched, so a task left
+// without a job records why (task.miss).
 function matchingJob(sessionId, jobId, threadId, window, claimed) {
-  if (!sessionId) return null;
+  if (!sessionId) return { job: null, count: 0 };
   const matches = [];
   for (const root of jobs.stateRoots()) {
     let dirs;
@@ -130,9 +133,11 @@ function matchingJob(sessionId, jobId, threadId, window, claimed) {
       }
     }
   }
-  if (threadId && !jobId) return matches.reduce((newest, job) =>
-    !newest || Date.parse(job.createdAt) > Date.parse(newest.createdAt) ? job : newest, null);
-  return matches.length === 1 ? matches[0] : null;
+  if (threadId && !jobId) {
+    return { job: matches.reduce((newest, job) =>
+      !newest || Date.parse(job.createdAt) > Date.parse(newest.createdAt) ? job : newest, null), count: matches.length };
+  }
+  return { job: matches.length === 1 ? matches[0] : null, count: matches.length };
 }
 
 function toolWindow(data, toolUseId) {
@@ -178,7 +183,8 @@ function register(state, hookInput, jobId, returned = true) {
   const responseThread = response.match(/(?:^|\n)\[codex\] Thread ready \(([0-9a-f-]{36})\)\.(?:\n|$)/i)?.[1];
   const claimed = new Set(session.tasks.map((task) => task.jobId).filter(Boolean));
   const exactId = jobId || responseId;
-  const job = matchingJob(sessionId, exactId, UUID.test(responseThread || '') ? responseThread : null, window, exactId ? new Set() : claimed);
+  const thread = UUID.test(responseThread || '') ? responseThread : null;
+  const { job, count } = matchingJob(sessionId, exactId, thread, window, exactId ? new Set() : claimed);
   const existing = job?.id && session.tasks.find((task) => task.jobId === job.id);
   if (existing) {
     existing.returned = returned || existing.returned;
@@ -189,6 +195,11 @@ function register(state, hookInput, jobId, returned = true) {
   const start = window?.start ?? null;
   const threadId = UUID.test(job?.threadId || '') ? job.threadId : null;
   const task = { jobId: job?.id || null, threadId, codex: null, start, claude: null, returned, done: false };
+  if (!job) {
+    // Why the task has no job, for checking ledger coverage.
+    task.miss = exactId || thread ? 'no job with that id' : !window ? 'no tool window in transcript'
+      : count ? `${count} jobs in the window` : 'no job in the window';
+  }
   session.tasks.push(task);
   readUsage(ledger, task);
   if (session.tasks.length > 100) session.tasks.splice(0, session.tasks.length - 100);
@@ -199,6 +210,8 @@ function register(state, hookInput, jobId, returned = true) {
 function finish(state, hookInput) {
   const session = state.handoffLedger?.[hookInput.session_id];
   if (!session) return;
+  // Nothing to settle: skip reading up to TAIL_BYTES of transcript.
+  if (!session.tasks.some((task) => task.returned && !task.done)) return;
   let data;
   try { data = tail(hookInput.transcript_path); } catch (_) { return; }
   const starts = session.tasks.map((task) => task.start).filter((start) => start !== null).sort((a, b) => a - b);

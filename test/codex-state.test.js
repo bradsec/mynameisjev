@@ -13,25 +13,40 @@ process.env.CODEX_HOME = path.join(tmp, 'codex');
 const st = require('../plugin/scripts/jev-state');
 const codex = require('../plugin/scripts/jev-codex');
 
-test('task command hides progress, prints fatal stderr, and keeps its exit code', () => {
-  const script = path.join(tmp, 'companion.mjs');
-  fs.writeFileSync(script, 'process.stderr.write("progress\\n"); process.exit(Number(process.env.FAIL || 0));');
-  const command = codex.taskCommand(script, '', 'brief');
+test('task command uses a short wrapper command and a random quoted heredoc', () => {
+  const command = codex.taskCommand('--write', 'brief');
   const delimiter = command.match(/<<'([^']+)'/)[1];
-  assert.match(delimiter, /^JEV_BRIEF_[a-f0-9]+$/);
-  assert.match(command, new RegExp(`\\n${delimiter}\\n`));
-  assert.notStrictEqual(delimiter, codex.taskCommand(script, '', 'brief').match(/<<'([^']+)'/)[1]);
-  const run = (fail) => spawnSync('bash', ['-c', command], { encoding: 'utf8', env: { ...process.env, FAIL: String(fail) } });
-  assert.deepStrictEqual([run(0).status, run(0).stderr], [0, '']);
-  const failed = run(7);
-  assert.deepStrictEqual([failed.status, failed.stderr], [7, 'progress\n']);
+  assert.match(delimiter, /^JEV_BRIEF_[a-f0-9]{6}$/);
+  assert.match(command, /node ".*\/jev-codex-run\.js" --write <<'/);
+  assert.ok(command.endsWith(`\nbrief\n${delimiter}`));
+  assert.notStrictEqual(delimiter, codex.taskCommand('', 'brief').match(/<<'([^']+)'/)[1]);
+  assert.doesNotMatch(command, /mktemp|jev_err|2>|\\/);
 });
 
-test('task command handles shell metacharacters in the companion path', () => {
-  const script = path.join(tmp, "companion '$HOME'.mjs");
-  fs.writeFileSync(script, 'process.stdout.write("ok")');
-  const result = spawnSync('bash', ['-c', codex.taskCommand(script, '', 'brief')], { encoding: 'utf8' });
-  assert.deepStrictEqual([result.status, result.stdout, result.stderr], [0, 'ok', '']);
+test('task command preserves shell metacharacters on stdin', () => {
+  const scripts = path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins/cache/openai-codex/codex/1.0.0/scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.writeFileSync(path.join(scripts, 'codex-companion.mjs'), 'process.stdin.pipe(process.stdout);');
+  const brief = 'Goal: "quotes" and \'single quotes\'\n$HOME $(exit 9) `exit 8`';
+  const result = spawnSync('bash', ['-c', codex.taskCommand('', brief)], { encoding: 'utf8' });
+  assert.deepStrictEqual([result.status, result.stdout, result.stderr], [0, `${brief}\n`, '']);
+  fs.rmSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins'), { recursive: true });
+});
+
+test('task command escapes its wrapper path and normalizes Windows separators', () => {
+  const vm = require('vm');
+  const script = path.resolve(__dirname, '../plugin/scripts/jev-codex.js');
+  const directory = path.join(tmp, process.platform === 'win32' ? "wrapper '$HOME' `exit 8`" : 'wrapper " $HOME `exit 8`');
+  fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory, 'jev-codex-run.js'), 'process.stdin.pipe(process.stdout);');
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(script, 'utf8'), {
+    require: require('module').createRequire(script), module, process,
+    __dirname: directory.replace(/\//g, '\\'),
+  });
+  const command = module.exports.taskCommand('', 'brief');
+  const result = spawnSync('bash', ['-c', command], { encoding: 'utf8' });
+  assert.deepStrictEqual([result.status, result.stdout, result.stderr], [0, 'brief\n', '']);
 });
 
 test('defaults: router only, every optional feature off', () => {
