@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix the Codex wrapper on Windows: a task that exits before reading its
+  whole brief no longer adds a stray `write EOF` error to its output.
+
 ## 0.3.31
 
 - Codex hand-offs run through a new wrapper, `jev-codex-run.js`, so each

@@ -66,8 +66,9 @@ if (!companion) {
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   child.on('error', (error) => { stderr += `${error.message}\n`; });
   child.stdin.on('error', (error) => {
-    // A task can exit before consuming the whole brief.
-    if (error.code !== 'EPIPE') {
+    // A task can exit before consuming the whole brief. Windows reports the
+    // closed pipe as EOF rather than EPIPE.
+    if (error.code !== 'EPIPE' && error.code !== 'EOF') {
       stderr += `${error.message}\n`;
       child.kill();
     }
