@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.31
 
 - Codex hand-offs run through a new wrapper, `jev-codex-run.js`, so each
   routed command is a short `node ... <<'JEV_BRIEF_x'` call instead of a
