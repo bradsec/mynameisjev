@@ -37,6 +37,14 @@ test('CLI rejects stray arguments and reuses no handoff path', async (t) => {
   assert.match(await run('report', 'bad'), /^Error: /);
   assert.match(await run('transfer', 'invalid'), /^Error: usage: \/mynameisjev:transfer/);
 
+  assert.match(await run('privacy'), /Privacy: strict/);
+  assert.match(await run('privacy', 'standard'), /Privacy: standard/);
+  assert.equal(st.readState().privacy, 'standard');
+  assert.match(await run('privacy', 'off'), /^Error: usage: \/mynameisjev:privacy/);
+  assert.equal(st.readState().privacy, 'standard');
+  assert.match(await run('privacy', 'strict'), /Privacy: strict/);
+  assert.match(await run('status'), /Privacy: strict/);
+
   const first = (await run('handoff')).trim();
   fs.writeFileSync(first, 'note');
   const second = (await run('handoff')).trim();

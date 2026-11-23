@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { redact, MARK } = require('../plugin/scripts/jev-redact');
+const { redact, sanitize, MARK } = require('../plugin/scripts/jev-redact');
 
 // Built by concatenation so the test file holds no string that secret
 // scanners would flag as a real credential.
@@ -63,4 +63,31 @@ test('leaves ordinary text alone', () => {
 test('passes through non-strings and empty text', () => {
   assert.strictEqual(redact(''), '');
   assert.strictEqual(redact(null), null);
+});
+
+test('sanitize replaces fenced code with line count and language', () => {
+  assert.strictEqual(sanitize('Fix this:\n```js\nconst secret = 1;\nrun();\n```\nThanks.'),
+    'Fix this:\n[code block: 2 lines, js]\nThanks.');
+  assert.strictEqual(sanitize('~~~\none line\n~~~'), '[code block: 1 lines]');
+});
+
+test('sanitize collapses long pasted runs after three lines', () => {
+  const lines = Array.from({ length: 9 }, (_, i) => `line ${i + 1}`);
+  assert.strictEqual(sanitize(`Review:\n${lines.join('\n')}\n\nThen advise.`),
+    'Review:\nline 1\nline 2\n[7 more lines]\n\nThen advise.');
+});
+
+test('sanitize replaces identifying text and keeps prose and versions', () => {
+  const out = sanitize('Please contact me@example.com, check https://example.com/private?q=1, 192.0.2.4, 2001:db8::1, +1 (415) 555-0134, /home/alice/project/file.js, ~/notes/todo.txt, and C:\\Users\\alice\\work\\app.js. Version 2.1.330 and count 123456789 remain.');
+  for (const value of ['[email]', '[url: example.com]', '[ip]', '[phone]', 'file.js', 'todo.txt', 'app.js', '2.1.330', '123456789']) assert.ok(out.includes(value), value);
+  for (const value of ['me@example.com', '/private', '192.0.2.4', '2001:db8::1', '555-0134', '/home/alice', 'C:\\Users']) assert.ok(!out.includes(value), value);
+});
+
+test('sanitize redacts secrets and caps output at 1000 characters', () => {
+  assert.strictEqual(sanitize(`Use ${fake('sk-or-v1-', 40)}`), `Use ${MARK}`);
+  assert.strictEqual(sanitize('a'.repeat(1200)).length, 1000);
+});
+
+test('sanitize keeps ISO dates but masks phone numbers', () => {
+  assert.strictEqual(sanitize('Due 2026-11-23, call +61 412 345 678'), 'Due 2026-11-23, call [phone]');
 });

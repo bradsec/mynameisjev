@@ -60,6 +60,42 @@ test('secrets are redacted from the Jev request and the stored prompt', () => {
   assert.strictEqual(r.bodies[0].model, 'typesafe/jev-1.14');
 });
 
+test('strict privacy is default for the request and stored previous prompt', () => {
+  const r = run('Fix this code:\n```js\nconst privateValue = 42;\n```\nThen explain.');
+  assert.match(r.bodies[0].state.message, /\[code block: 1 lines, js\]/);
+  assert.ok(!r.bodies[0].state.message.includes('privateValue'));
+  assert.match(r.state.lastPrompt.text, /\[code block: 1 lines, js\]/);
+  const next = run('Continue the explanation with another example.', { keepState: true });
+  assert.match(next.bodies[0].state.previous_message, /\[code block: 1 lines, js\]/);
+});
+
+test('standard privacy restores redacted prompt and previous prompt', () => {
+  const r = run('Fix this code:\n```js\nconst privateValue = 42;\n```\nThen explain.', { state: { privacy: 'standard' } });
+  assert.match(r.bodies[0].state.message, /privateValue/);
+  assert.match(r.state.lastPrompt.text, /privateValue/);
+  const next = run('Continue the explanation with another example.', { keepState: true });
+  assert.match(next.bodies[0].state.previous_message, /privateValue/);
+});
+
+test('project privacy overrides global privacy', () => {
+  const prompt = 'Fix this code:\n```js\nconst privateValue = 42;\n```\nThen explain.';
+  const strict = run(prompt, { state: { privacy: 'standard' }, config: '{"privacy":"strict"}' });
+  assert.ok(!strict.bodies[0].state.message.includes('privateValue'));
+  const standard = run(prompt, { state: { privacy: 'strict' }, config: '{"privacy":"standard"}' });
+  assert.match(standard.bodies[0].state.message, /privateValue/);
+});
+
+test('project privacy config accepts supported values and rejects others', () => {
+  const st = require('../plugin/scripts/jev-state');
+  const cfg = path.join(project, '.claude', 'mynameisjev.json');
+  for (const privacy of ['strict', 'standard']) {
+    fs.writeFileSync(cfg, JSON.stringify({ privacy }));
+    assert.strictEqual(st.readProjectConfig(project).privacy, privacy);
+  }
+  fs.writeFileSync(cfg, '{"privacy":"off"}');
+  assert.match(st.readProjectConfig(project).error, /"privacy" must be/);
+});
+
 test('a size answer without a confidence counts as unsure, not failed', () => {
   const r = run('Write a short email to my landlord about the faucet.', { size: { choice: 'everyday' } });
   assert.strictEqual(r.state.stats.unsure, 1);
@@ -84,7 +120,7 @@ test('project prefer codex overrides the global setting', () => {
   // No Codex here, so prefer only shows in the status line; check it parses.
   const st = require('../plugin/scripts/jev-state');
   fs.writeFileSync(path.join(project, '.claude', 'mynameisjev.json'), '{"prefer": "codex"}');
-  assert.deepStrictEqual(st.readProjectConfig(project), { path: path.join(project, '.claude', 'mynameisjev.json'), router: true, prefer: 'codex', error: null });
+  assert.deepStrictEqual(st.readProjectConfig(project), { path: path.join(project, '.claude', 'mynameisjev.json'), router: true, prefer: 'codex', privacy: null, error: null });
   fs.writeFileSync(path.join(project, '.claude', 'mynameisjev.json'), '{"prefer": "gpt"}');
   assert.match(st.readProjectConfig(project).error, /"prefer" must be/);
   fs.rmSync(path.join(project, '.claude', 'mynameisjev.json'));

@@ -39,7 +39,7 @@ const codex = require('./jev-codex');
 const skills = require('./jev-skills');
 const sync = require('./jev-sync');
 const updates = require('./jev-updates');
-const { redact } = require('./jev-redact');
+const { redact, sanitize } = require('./jev-redact');
 const { askJev } = require('./jev-api');
 const jevPace = require('./jev-pace');
 const tiebreak = require('./jev-tiebreak');
@@ -719,8 +719,8 @@ const SHIFT_QUESTION = {
 // Below this confidence a size or model answer is not acted on.
 const CONFIDENT = 0.6;
 
-async function classify(prompt, previous, apiKey) {
-  const state = { message: redact(prompt).slice(0, 4000) };
+async function classify(prompt, previous, apiKey, privacy) {
+  const state = { message: privacy === 'standard' ? redact(prompt).slice(0, 4000) : sanitize(prompt) };
   const questions = {
     size: {
       type: 'choice',
@@ -1040,12 +1040,14 @@ function main() {
       // fresh context, so a topic change there needs no /clear. Updated before
       // the request so a failed call still leaves the right baseline.
       const last = state.lastPrompt;
-      const previous = sessionId && last && last.session === sessionId ? last.text : null;
-      state.lastPrompt = sessionId ? { session: sessionId, text: redact(prompt).slice(0, PREVIOUS_CHARS) } : null;
+      const privacy = (project && project.privacy) || state.privacy || 'strict';
+      const previous = sessionId && last && last.session === sessionId
+        ? (privacy === 'standard' ? last.text : sanitize(last.text)) : null;
+      state.lastPrompt = sessionId ? { session: sessionId, text: privacy === 'standard' ? redact(prompt).slice(0, PREVIOUS_CHARS) : sanitize(prompt) } : null;
 
       let result;
       try {
-        result = await classify(prompt, previous, apiKey);
+        result = await classify(prompt, previous, apiKey, privacy);
       } catch (e) {
         const timedOut = e.name === 'AbortError';
         // Short form for the status line's JEV segment.

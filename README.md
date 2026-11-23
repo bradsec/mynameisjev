@@ -244,6 +244,7 @@ lists this session's jobs on demand.
 | --- | --- |
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
+| `/mynameisjev:privacy [strict \| standard]` | Show or set router privacy; strict is the default |
 | `/mynameisjev:decide [A \| B -- criteria]` | Jev picks between options; see [Decide](#decide) |
 | `/mynameisjev:compare [a.js b.js -- criteria]` | Jev scores code variants; see [Compare](#compare) |
 | `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
@@ -588,6 +589,7 @@ there:
 | --- | --- |
 | `router` | `false` stops sizing in this project: no message text is sent. Limit notices and `+` overrides still work |
 | `prefer` | `"codex"` or `"claude"`, overriding the `/mynameisjev:prefer --default` setting in this project. A session's own `/mynameisjev:prefer` still wins |
+| `privacy` | `"strict"` or `"standard"`, overriding the global `/mynameisjev:privacy` setting in this project |
 
 If the file can't be read or has an invalid value, Jev tells you once per
 session and does not size messages in that project until it is fixed. The
@@ -686,12 +688,22 @@ The generated `AGENTS.md`:
 
 ## Privacy
 
-- With the router on, the text of each message you send (and, for topic-shift
-  detection, the first 1,000 characters of your previous message) goes to
-  OpenRouter and TypeSafe. `/mynameisjev:off` stops it everywhere;
-  `"router": false` in a project's `.claude/mynameisjev.json` stops it there.
+- Router privacy defaults to `strict`. Jev receives up to 1,000 characters
+  of your instruction text. Code blocks, runs of eight or more non-empty
+  lines beyond their first three, emails, URLs,
+  IP addresses, phone numbers and full paths are replaced with placeholders
+  or basenames. The previous message used for topic-shift detection goes
+  through the same mode and is stored locally in that form.
+- `/mynameisjev:privacy standard` restores the previous router behavior:
+  likely-secret redaction, up to 4,000 characters of the current message and
+  1,000 characters of the previous message. Set `"privacy": "strict"` or
+  `"privacy": "standard"` in a project's `.claude/mynameisjev.json` to
+  override the global mode there. `/mynameisjev:off` stops router sends
+  everywhere; `"router": false` stops them in one project.
+- Check, decide, compare and tiebreak still send content as before, with
+  likely-secret redaction but without strict router sanitization.
 - With `/mynameisjev:check on`, each turn's request and Claude's final reply
-  go to OpenRouter and TypeSafe, with the same redaction.
+  go to OpenRouter and TypeSafe, with that redaction.
 - With `/mynameisjev:tiebreak on`, Claude may send the options or code it is
   choosing between, with a short summary of the task, as `decide` and
   `compare` do.
@@ -708,6 +720,9 @@ The generated `AGENTS.md`:
   This is pattern matching, so a secret in an unusual format can still get
   through; turn sizing off for projects where that matters.
 - The previous message is kept locally in `~/.claude/mynameisjev/state.json`.
+- OpenRouter's general policy says it does not store prompts unless you opt in,
+  but neither OpenRouter nor TypeSafe documents retention for the Jev decisions
+  API, so treat sent text as shared with both.
 - Nothing else leaves your machine except the calls the optional features
   make (GitHub release checks, marketplace refreshes, Codex).
 

@@ -6,6 +6,7 @@
 // not every possible credential.
 
 const MARK = '[REDACTED]';
+const { isIP } = require('node:net');
 
 const PATTERNS = [
   // PEM private key blocks, whole.
@@ -48,4 +49,39 @@ function redact(text) {
   return out;
 }
 
-module.exports = { redact, MARK };
+function sanitize(text) {
+  if (typeof text !== 'string' || text === '') return text;
+  let out = redact(text).replace(/^(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)^\1[ \t]*$/gm, (_, fence, language, body) => {
+    const lines = body.endsWith('\n') ? body.slice(0, -1) : body;
+    return `[code block: ${lines ? lines.split('\n').length : 0} lines${language.trim() ? `, ${language.trim()}` : ''}]`;
+  });
+  // Collapse every run of eight or more non-empty lines, keeping its first three.
+  const lines = out.split('\n');
+  const compact = [];
+  for (let i = 0; i < lines.length;) {
+    let end = i;
+    while (end < lines.length && lines[end].trim()) end++;
+    if (end - i >= 8) compact.push(...lines.slice(i, i + 3), `[${end - i - 3} more lines]`);
+    else compact.push(...lines.slice(i, end));
+    if (end < lines.length) compact.push(lines[end]);
+    i = end + 1;
+  }
+  out = compact.join('\n');
+  out = out.replace(/\bhttps?:\/\/[^\s<>()]+/gi, (url) => {
+    try { return `[url: ${new URL(url).hostname}]`; } catch (_) { return '[url]'; }
+  });
+  out = out.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]');
+  out = out.replace(/\b[0-9a-f:]*:[0-9a-f:]+\b/gi, (value) => isIP(value) === 6 ? '[ip]' : value);
+  out = out.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]');
+  out = out.replace(/\+?\d[\d ().-]{5,}\d/g, (value) => {
+    const digits = value.replace(/\D/g, '');
+    // ISO dates (2026-11-23) carry no identity and help size the request.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    return digits.length >= 7 && /[ ()-]/.test(value) ? '[phone]' : value;
+  });
+  out = out.replace(/(^|[\s(])((?:~\/|\/|[A-Za-z]:\\)(?:[^\s,;:()[\]{}<>\\/]+[\\/])*[^\s,;:()[\]{}<>\\/]+)/gm,
+    (_, before, full) => before + full.split(/[\\/]/).pop());
+  return out.slice(0, 1000);
+}
+
+module.exports = { redact, sanitize, MARK };

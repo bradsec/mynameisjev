@@ -135,6 +135,7 @@ const DEFAULT_STATE = {
   // Set the model of general-purpose subagents to the Claude helper Jev
   // suggested for the message (`/mynameisjev:enforce on`).
   enforce: false,
+  privacy: 'strict',
   // Last Claude usage notice shown, so each threshold crossing shows once.
   limitNotice: null,
   // Per-tier Codex model overrides (`/mynameisjev:codex set`).
@@ -446,7 +447,8 @@ function reviewFor(state, session) {
 //   { "router": false }     never send this project's messages to Jev
 //   { "prefer": "codex" }   or "claude": overrides the /mynameisjev:prefer
 //                           default here; a session's own choice still wins
-// Returns null when the file is absent, else { path, router, prefer, error }.
+//   { "privacy": "standard" } or "strict": overrides /mynameisjev:privacy here
+// Returns null when the file is absent, else { path, router, prefer, privacy, error }.
 // A file that can't be read or parsed sets `error` and router: false, so a
 // broken privacy opt-out fails closed instead of sending text.
 const PROJECT_CONFIG = path.join('.claude', 'mynameisjev.json');
@@ -459,22 +461,23 @@ function readProjectConfig(dir) {
     raw = fs.readFileSync(file, 'utf8');
   } catch (e) {
     if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return null;
-    return { path: file, router: false, prefer: null, error: e.message };
+    return { path: file, router: false, prefer: null, privacy: null, error: e.message };
   }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    return { path: file, router: false, prefer: null, error: `invalid JSON: ${e.message}` };
+    return { path: file, router: false, prefer: null, privacy: null, error: `invalid JSON: ${e.message}` };
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { path: file, router: false, prefer: null, error: 'expected a JSON object' };
+    return { path: file, router: false, prefer: null, privacy: null, error: 'expected a JSON object' };
   }
   const problems = [];
   if (parsed.router !== undefined && typeof parsed.router !== 'boolean') problems.push('"router" must be true or false');
   if (parsed.prefer !== undefined && parsed.prefer !== 'codex' && parsed.prefer !== 'claude') problems.push('"prefer" must be "codex" or "claude"');
-  if (problems.length > 0) return { path: file, router: false, prefer: null, error: problems.join('; ') };
-  return { path: file, router: parsed.router !== false, prefer: parsed.prefer || null, error: null };
+  if (parsed.privacy !== undefined && parsed.privacy !== 'strict' && parsed.privacy !== 'standard') problems.push('"privacy" must be "strict" or "standard"');
+  if (problems.length > 0) return { path: file, router: false, prefer: null, privacy: null, error: problems.join('; ') };
+  return { path: file, router: parsed.router !== false, prefer: parsed.prefer || null, privacy: parsed.privacy || null, error: null };
 }
 
 // Claude model families, cheapest first. The one list every hook reads: the

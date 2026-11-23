@@ -28,7 +28,7 @@ const sessionId = process.env.CLAUDE_CODE_SESSION_ID || null;
 const COMMANDS = {
   on, off, status, limits, codex: codexCommand, sync: syncCommand, style: styleCommand,
   update: updateCommand, transfer: transferCommand, statusline: statuslineCommand, prefer: preferCommand, review: reviewCommand,
-  report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand,
+  report, coldguard: coldguardCommand, handoff: handoffPath, enforce: enforceCommand, privacy: privacyCommand,
   decide: decideCommand, check: checkCommand, compare: compareCommand,
   tiebreak: tiebreakCommand, 'tiebreak-status': tiebreakStatus,
 };
@@ -36,7 +36,7 @@ const COMMANDS = {
 // write. Commands not listed parse their own arguments.
 const MAX_ARGS = {
   on: 0, off: 0, status: 0, limits: 0, handoff: 0, 'tiebreak-status': 0,
-  report: 1, sync: 1, style: 1, update: 1, transfer: 1, coldguard: 1, enforce: 1, check: 1, tiebreak: 1,
+  report: 1, sync: 1, style: 1, update: 1, transfer: 1, coldguard: 1, enforce: 1, privacy: 1, check: 1, tiebreak: 1,
   statusline: 2, codex: 4,
 };
 
@@ -109,6 +109,7 @@ async function status() {
   ]);
   if (state.lastSilent) console.log(`Last silent: ${state.lastSilent.reason} (${state.lastSilent.at})`);
   const project = st.readProjectConfig(st.projectDir(process.cwd()));
+  console.log(`Privacy: ${(project && !project.error && project.privacy) || state.privacy || 'strict'}`);
   if (project) {
     console.log(project.error
       ? `Project config: ${project.path} is not usable (${project.error}); sizing is off here until it is fixed.`
@@ -405,6 +406,15 @@ async function enforceCommand([arg]) {
   if (toggle('enforce', 'Enforce hand-offs', arg)) return;
   if (arg) throw new Error('usage: /mynameisjev:enforce [on | off]');
   console.log(`Enforce hand-offs: ${onOff(state.enforce)}. When on and Jev suggested a Claude helper for the message, a general-purpose subagent Claude starts without choosing a model runs on that helper's model. When the message is routed to Codex, Claude's own Edit/Write/NotebookEdit calls are denied and sent to Codex instead. usage: /mynameisjev:enforce [on | off]`);
+}
+
+async function privacyCommand([arg]) {
+  if (arg && arg !== 'strict' && arg !== 'standard') throw new Error('usage: /mynameisjev:privacy [strict | standard]');
+  if (arg) {
+    state.privacy = arg;
+    st.writeState(state);
+  }
+  console.log(`Privacy: ${state.privacy || 'strict'}`);
 }
 
 async function coldguardCommand([arg]) {
