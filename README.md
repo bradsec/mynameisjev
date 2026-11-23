@@ -14,6 +14,8 @@ structured decision model on OpenRouter, a few typed questions about your
 message (how big is the job, does it need the earlier conversation, will it
 produce bulky output, is it coding, is it a new topic) and turns the answers
 into a short routing note for Claude. One Jev call costs about $0.00002.
+By default Jev gets a cut-down copy of your message, with code, long pastes,
+emails, URLs and paths replaced by placeholders (see [Privacy](#privacy)).
 
 - **Model-aware delegation.** Knows which Claude model the session runs and
   only suggests a helper (`mynameisjev:tiny` on Haiku at low effort,
@@ -445,8 +447,9 @@ and Jev acts on them only when it is at least 60% confident the message asks
 that model to do the work. Jev is asked to count only a request in your own
 words: not a name inside quoted or pasted text, not "don't use Fable", and
 not another thing with the same name (a story, the Fable compiler, Astra DB).
-That reading is a model's judgement and can be wrong; a prefix is exact. Only
-the first 4000 characters of a message are read. A short message that names
+That reading is a model's judgement and can be wrong; a prefix is exact. Jev
+reads only the text that [Privacy](#privacy) mode sends: 1,000 characters in
+strict mode (the default), 4,000 in standard. A short message that names
 Fable or Astra is still sent to Jev; slash commands never are.
 
 Models missing from your Codex account's list fall back to Codex's default,
