@@ -16,6 +16,10 @@ const updates = require('./jev-updates');
 const tiebreak = require('./jev-tiebreak');
 
 const state = st.readState();
+function saveSettings() {
+  if (!st.writeState(state, { waitMs: 5000 })) throw new Error("could not save settings: state file is locked by another process; try again");
+}
+
 const [command = 'status', ...rawArgs] = process.argv.slice(2);
 const cmd = command.toLowerCase();
 const args = cmd === 'style' ? rawArgs : rawArgs.map((a) => a.toLowerCase());
@@ -61,14 +65,14 @@ const MAX_ARGS = {
 function toggle(key, label, arg) {
   if (arg !== 'on' && arg !== 'off') return false;
   state[key] = arg === 'on';
-  st.writeState(state);
+  saveSettings();
   console.log(`${label}: ${arg}.`);
   return true;
 }
 
 async function on() {
   state.enabled = true;
-  st.writeState(state);
+  saveSettings();
   console.log('Jev router: ON');
   if (!process.env.OPENROUTER_API_KEY) {
     console.log('WARNING: OPENROUTER_API_KEY is not set in this shell, so the router stays silent. Add it to your shell profile and restart Claude Code.');
@@ -82,7 +86,7 @@ async function on() {
 
 async function off() {
   state.enabled = false;
-  st.writeState(state);
+  saveSettings();
   console.log('Jev router: OFF');
 }
 
@@ -291,7 +295,7 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
   const cache = await codex.refreshCache();
   if (sub === 'reset') {
     state.codexTiers = {};
-    st.writeState(state);
+    saveSettings();
     console.log('Codex tier models reset: picked from the Codex model list again.');
   } else if (sub === 'set') {
     if (!codex.DEFAULT_TIERS[tier]) throw new Error(`tier must be one of: ${Object.keys(codex.DEFAULT_TIERS).join(', ')}`);
@@ -300,7 +304,7 @@ async function codexCommand([sub = 'show', tier, model, effort]) {
     if (!ids.includes(model)) throw new Error(`unknown model "${model}". Available: ${ids.join(', ')}`);
     if (effort && !codex.TASK_EFFORTS.includes(effort)) throw new Error(`effort must be one of: ${codex.TASK_EFFORTS.join(', ')}`);
     state.codexTiers = { ...state.codexTiers, [tier]: effort ? { model, effort } : { model } };
-    st.writeState(state);
+    saveSettings();
     console.log(`Codex ${tier} -> ${model}${effort ? ` (${effort})` : ''}`);
   } else if (sub !== 'show') {
     throw new Error('usage: /mynameisjev:codex [show | set <tier> <model> [effort] | reset]');
@@ -334,7 +338,7 @@ async function syncCommand([arg]) {
 async function styleCommand([arg]) {
   if (arg !== undefined) {
     state.outputStyle = arg === 'off' ? null : arg;
-    st.writeState(state);
+    saveSettings();
   }
   const chosen = skills.outputStyle(state.outputStyle);
   console.log(`Output style: ${state.outputStyle || 'off'}`);
@@ -365,7 +369,7 @@ async function preferCommand(args) {
   if (value === 'codex' || value === 'claude') {
     if (isDefault) state.prefer = value;
     else st.putSessionSetting(state, sessionId, 'prefer', value);
-    st.writeState(state);
+    saveSettings();
   } else if (value) {
     throw new Error(usage);
   }
@@ -388,7 +392,7 @@ async function reviewCommand(args) {
   if (value === 'on' || value === 'off') {
     if (isDefault) state.review = value === 'on';
     else st.putSessionSetting(state, sessionId, 'review', value === 'on');
-    st.writeState(state);
+    saveSettings();
   } else if (value) {
     throw new Error(usage);
   }
@@ -456,7 +460,8 @@ function costedAsk(feature) {
   return async (...args) => {
     const data = await askJev(...args);
     st.addCost(state, feature, data && data.usage && data.usage.cost);
-    st.writeState(state);
+    // A cost counter is not worth losing a paid answer over: a locked state skips it.
+    st.writeState(state, { waitMs: 5000 });
     return data;
   };
 }
@@ -470,7 +475,7 @@ function autoGate(args) {
     console.log(r.message);
     return false;
   }
-  st.writeState(state);
+  st.writeState(state, { waitMs: 5000 });
   return true;
 }
 
@@ -569,7 +574,7 @@ async function statuslineCommand([arg, flag]) {
     state.previousStatusLine = previous || null;
     state.statusLineMode = arg === 'wrap' ? 'wrap' : 'full';
     state.statusLineJev = arg === 'wrap' && flag === '--with-jev';
-    st.writeState(state);
+    saveSettings();
     // Wrap keeps the wrapped setting's other fields (padding, refreshInterval).
     // Jev's own refreshes on a timer too, so the Codex line and the cache
     // countdown stay current while the session is idle.
@@ -598,7 +603,7 @@ async function statuslineCommand([arg, flag]) {
       state.previousStatusLine = null;
       state.statusLineMode = null;
       state.statusLineJev = false;
-      st.writeState(state);
+      saveSettings();
       console.log('Status line removed; the previous one is restored.');
     }
   } else if (arg) {

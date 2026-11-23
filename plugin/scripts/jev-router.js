@@ -507,7 +507,7 @@ function limitNoticeFor(claude, codexNow, autoTransferOn) {
 // unimported for a manual /codex:transfer. The copy must sit under
 // ~/.claude/projects (the plugin rejects other paths) and is deleted once
 // imported; the Codex thread does not need it.
-function autoTransfer(transcriptPath, sessionId, cwd) {
+function autoTransfer(transcriptPath, sessionId, cwd, timeoutMs = TRANSFER_TIMEOUT_MS) {
   const companion = codex.companionPath();
   if (!companion) return Promise.resolve({ error: 'Codex plugin not installed' });
   const copyDir = path.join(os.homedir(), '.claude', 'projects', 'jev-transfers');
@@ -520,12 +520,12 @@ function autoTransfer(transcriptPath, sessionId, cwd) {
   }
   return new Promise((resolve) => {
     execFile(process.execPath, [companion, 'transfer', '--json', '--source', copyPath],
-      { cwd: cwd || process.cwd(), timeout: TRANSFER_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+      { cwd: cwd || process.cwd(), timeout: timeoutMs, maxBuffer: 1024 * 1024 },
       (err, stdout, stderr) => {
         try { fs.unlinkSync(copyPath); } catch (e) { /* already gone */ }
         if (err) {
           const detail = (stderr || '').trim().split('\n').pop() || err.message.split('\n')[0];
-          resolve({ error: err.killed ? `timed out after ${TRANSFER_TIMEOUT_MS}ms` : detail });
+          resolve({ error: err.killed ? `timed out after ${timeoutMs}ms` : detail });
           return;
         }
         try {
@@ -716,7 +716,7 @@ const SHIFT_QUESTION = {
 // Below this confidence a size or model answer is not acted on.
 const CONFIDENT = 0.6;
 
-async function classify(prompt, previous, apiKey) {
+async function classify(prompt, previous, apiKey, timeoutMs = TIMEOUT_MS) {
   const state = { message: sanitize(prompt) };
   const questions = {
     size: {
@@ -798,7 +798,7 @@ async function classify(prompt, previous, apiKey) {
     state.previous_message = previous;
     questions.shift = SHIFT_QUESTION;
   }
-  const data = await askJev(state, questions, { apiKey, timeoutMs: TIMEOUT_MS });
+  const data = await askJev(state, questions, { apiKey, timeoutMs });
   const answer = data.answers && data.answers.size;
   if (!answer) throw new Error('response had no size answer');
   const noul = (key) => {
@@ -851,6 +851,8 @@ function main() {
   let input = '';
   process.stdin.on('data', (chunk) => { input += chunk; });
   process.stdin.on('end', async () => {
+    const deadline = Date.now() + 4000;
+    const remaining = () => Math.max(0, deadline - Date.now() - 100);
     const state = readState();
     if (!state.enabled) return;
     // Notices go to the user (systemMessage), context notes to Claude. Written
@@ -903,7 +905,7 @@ function main() {
       }
       // Started now so it runs alongside the Jev call; awaited in `finally`.
       if (state.autoTransfer && codexNow.available && claude && claude.pct >= AUTO_TRANSFER_PCT && transcriptPath && !transferredRecently(state, sessionId)) {
-        transfer = autoTransfer(transcriptPath, sessionId, cwd);
+        if (remaining() > 300) transfer = autoTransfer(transcriptPath, sessionId, cwd, Math.min(TRANSFER_TIMEOUT_MS, remaining()));
       }
       const isLow = claudeLow(claude);
       const limitNotice = limitNoticeFor(claude, codexNow, state.autoTransfer);
@@ -925,7 +927,7 @@ function main() {
       // Codex's AGENTS.md is generated locally, cheap enough to keep in sync on
       // every prompt. RTK hook setup is too slow for this hook, so it only
       // gets a once-per-session pointer.
-      if (state.sync) {
+      if (state.sync && remaining() > 300) {
         try {
           const synced = sync.syncAgents({ style: skills.outputStyle(state.outputStyle).skill });
           if (synced === 'updated') {
@@ -944,7 +946,7 @@ function main() {
       }
       // Daily update check runs in the background (jev-updates.js); its result
       // is announced once, on the first prompt after it lands.
-      if (state.updates) {
+      if (state.updates && remaining() > 300) {
         updates.refreshInBackgroundIfStale();
         const found = updates.readCache();
         if (found && found.checkedAt !== state.updatesNoticeAt) {
@@ -1043,7 +1045,8 @@ function main() {
 
       let result;
       try {
-        result = await classify(prompt, previous, apiKey);
+        if (remaining() < 300) return;
+        result = await classify(prompt, previous, apiKey, Math.min(TIMEOUT_MS, remaining()));
       } catch (e) {
         const timedOut = e.name === 'AbortError';
         // Short form for the status line's JEV segment.

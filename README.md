@@ -53,7 +53,7 @@ Everything else is opt-in (see [Optional features](#optional-features)).
 ## Requirements
 
 - [Claude Code](https://code.claude.com/docs) on Linux, macOS or Windows
-- Node.js 18 or later on your `PATH`
+- Node.js 22 or later on your `PATH`
 - An [OpenRouter API key](https://openrouter.ai/keys) in `OPENROUTER_API_KEY`
 - Optional: the [Codex CLI](https://github.com/openai/codex) and the
   [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc),
@@ -63,7 +63,7 @@ Everything else is opt-in (see [Optional features](#optional-features)).
 
 ### 1. Node.js
 
-Check with `node --version`. If it is missing or older than 18:
+Check with `node --version`. If it is missing or older than 22:
 
 | OS | Install |
 | --- | --- |
@@ -751,7 +751,7 @@ claude plugin validate plugin # plugin manifest
 To try local changes: `/plugin marketplace add /path/to/mynameisjev`, then
 install `mynameisjev@mynameisjev`.
 
-CI runs the tests on Linux, macOS and Windows with Node 18 and 22, and
+CI runs the tests on Linux, macOS and Windows with Node 22 and 24, and
 validates the manifests.
 
 To release:

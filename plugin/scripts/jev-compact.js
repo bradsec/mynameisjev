@@ -121,6 +121,10 @@ function save(hookInput) {
 // guard block the next prompt, so drop it until the next reply records one.
 function forgetPromptCache(sessionId) {
   const file = st.dataFile('prompt-cache.json');
+  st.withLock(st.dataFile('prompt-cache.lock'), 200, () => forgetPromptCacheLocked(file, sessionId));
+}
+
+function forgetPromptCacheLocked(file, sessionId) {
   let all;
   try {
     all = JSON.parse(fs.readFileSync(file, 'utf8'));

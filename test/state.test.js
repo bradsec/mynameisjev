@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-state-'));
 test.after(() => fs.rmSync(claudeDir, { recursive: true, force: true }));
@@ -91,21 +92,21 @@ test('state write removes a stale lock and releases its own lock', () => {
   assert.ok(!fs.existsSync(lock));
 });
 
-test('state write falls back within the lock deadline', () => {
+test('state write skips when another process holds the lock', () => {
   const lock = path.join(st.dataDir, 'state.lock');
   fs.writeFileSync(lock, 'other writer');
   try {
     const start = Date.now();
-    st.writeState({ enabled: false });
+    assert.strictEqual(st.writeState({ enabled: false }), false);
     assert.ok(Date.now() - start < 1000);
-    assert.deepStrictEqual(onDisk(), { enabled: false });
+    assert.deepStrictEqual(onDisk(), { enabled: true });
     assert.ok(fs.existsSync(lock));
   } finally {
     fs.rmSync(lock, { force: true });
   }
 });
 
-test('a busy rename is retried before the direct-write fallback', (t) => {
+test('a busy rename is retried before succeeding', (t) => {
   const file = path.join(st.dataDir, 'atomic.json');
   fs.writeFileSync(file, '{"old":true}');
   const real = fs.renameSync;
@@ -119,12 +120,36 @@ test('a busy rename is retried before the direct-write fallback', (t) => {
   assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"new":true}');
 });
 
-test('a rename that stays busy still saves the change', (t) => {
+test('a rename that stays busy preserves the old file', (t) => {
   const file = path.join(st.dataDir, 'atomic.json');
+  fs.writeFileSync(file, '{"old":true}');
   t.mock.method(fs, 'renameSync', () => { const e = new Error('busy'); e.code = 'EPERM'; throw e; });
-  st.writeFileAtomic(file, '{"kept":true}');
-  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"kept":true}');
+  assert.throws(() => st.writeFileAtomic(file, '{"kept":true}'), /busy/);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), '{"old":true}');
   assert.deepStrictEqual(fs.readdirSync(st.dataDir).filter((f) => f.endsWith('.tmp')), []);
+});
+
+test('concurrent effort updates keep both sessions', async () => {
+  const script = `require(${JSON.stringify(require.resolve('../plugin/scripts/jev-state'))}).shareEffort(process.argv[1], 'high')`;
+  const run = (session) => new Promise((resolve, reject) => execFile(process.execPath, ['-e', script, session],
+    { env: { ...process.env, CLAUDE_CONFIG_DIR: claudeDir } }, (error) => error ? reject(error) : resolve()));
+  await Promise.all([run('effort-a'), run('effort-b')]);
+  const all = JSON.parse(fs.readFileSync(st.dataFile('session-effort.json'), 'utf8'));
+  assert.equal(all['effort-a'].level, 'high');
+  assert.equal(all['effort-b'].level, 'high');
+});
+
+test('concurrent prompt-cache updates keep both sessions', async () => {
+  const script = require.resolve('../plugin/scripts/cc-statusline');
+  const run = (session) => new Promise((resolve, reject) => execFile(process.execPath, [script],
+    { env: { ...process.env, CLAUDE_CONFIG_DIR: claudeDir } },
+    (error) => error ? reject(error) : resolve()).stdin.end(JSON.stringify({
+    session_id: session, prompt_cache: { caching_observed: true, expires_at: 123, ttl: 300 },
+  })));
+  await Promise.all([run('cache-a'), run('cache-b')]);
+  const all = JSON.parse(fs.readFileSync(st.dataFile('prompt-cache.json'), 'utf8'));
+  assert.equal(all['cache-a'].expires_at, 123);
+  assert.equal(all['cache-b'].expires_at, 123);
 });
 
 test('a hand-built state is written as given', () => {

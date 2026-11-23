@@ -25,8 +25,7 @@ function dataFile(name) {
 // Hooks and the status line read these files while others write them, so a
 // write goes to a temp file and is renamed into place: readers see the old
 // file or the new one, never half of one. Windows refuses the rename while
-// another process has the file open, usually for a moment: retry briefly,
-// then fall back to a direct write rather than drop the change.
+// another process has the file open, usually for a moment: retry briefly.
 function writeFileAtomic(file, text) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, text);
@@ -39,18 +38,21 @@ function writeFileAtomic(file, text) {
         try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
         throw e;
       }
-      if (attempt < 3) { sleepMs(20); continue; }
+      if (attempt < 4) { sleepMs(10 * (2 ** attempt)); continue; }
       try { fs.unlinkSync(tmp); } catch (e2) { /* already gone */ }
-      fs.writeFileSync(file, text);
-      return;
+      throw e;
     }
   }
 }
 
 function shareEffort(session, level) {
-  let all = {};
   let file;
   try { file = dataFile('session-effort.json'); } catch (_) { return; }
+  try { withLock(dataFile('session-effort.lock'), 200, () => updateSharedEffort(file, session, level)); } catch (_) {}
+}
+
+function updateSharedEffort(file, session, level) {
+  let all = {};
   try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) {}
   if (all[session] && all[session].level === level) return;
   const now = Date.now();
@@ -62,6 +64,29 @@ function shareEffort(session, level) {
 }
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+function withLock(lockFile, waitMs, fn) {
+  const deadline = Date.now() + waitMs;
+  let locked = false;
+  do {
+    try {
+      const fd = fs.openSync(lockFile, 'wx');
+      fs.closeSync(fd);
+      locked = true;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      try {
+        if (Date.now() - fs.statSync(lockFile).mtimeMs > 5000) fs.unlinkSync(lockFile);
+      } catch (e2) { /* another writer removed it */ }
+      if (!locked && Date.now() < deadline) sleepMs(10);
+    }
+  } while (!locked && Date.now() < deadline);
+  if (!locked) return { ok: false, value: undefined };
+  try { return { ok: true, value: fn() }; }
+  finally {
+    try { fs.unlinkSync(lockFile); } catch (e) { /* another writer removed it */ }
+  }
+}
 
 // Everything beyond sizing and routing is opt-in: several features change
 // files outside Jev (Codex's AGENTS.md, plugin installs, Codex threads).
@@ -337,25 +362,10 @@ function assignInPlace(target, src) {
 // A state from readState is merged with the file's current contents (see
 // merge) and then updated to the result, so writing it again later counts
 // only what changed since. A state built by hand is written as given.
-function writeState(state) {
+function writeState(state, { waitMs = 500 } = {}) {
   const file = dataFile('state.json');
   const lock = dataFile('state.lock');
-  const deadline = Date.now() + 500;
-  let locked = false;
-  while (!locked && Date.now() < deadline) {
-    try {
-      const fd = fs.openSync(lock, 'wx');
-      fs.closeSync(fd);
-      locked = true;
-    } catch (e) {
-      if (e.code !== 'EEXIST') break;
-      try {
-        if (Date.now() - fs.statSync(lock).mtimeMs > 5000) fs.unlinkSync(lock);
-      } catch (e2) { /* another writer removed it */ }
-      if (!locked) sleepMs(10);
-    }
-  }
-  try {
+  return withLock(lock, waitMs, () => {
     let out = state;
     if (state[BASE] && fs.existsSync(file)) {
       out = merge(state[BASE], clone(state), readStateFile());
@@ -363,11 +373,7 @@ function writeState(state) {
     }
     writeFileAtomic(file, JSON.stringify(out, null, 2));
     if (state[BASE]) state[BASE] = clone(out);
-  } finally {
-    if (locked) {
-      try { fs.unlinkSync(lock); } catch (e) { /* another writer removed it */ }
-    }
-  }
+  }).ok;
 }
 
 // Route bookkeeping. Sessions run side by side, so each keeps its own route;
@@ -514,7 +520,7 @@ function projectDir(fallback) {
 }
 
 module.exports = {
-  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, shareEffort, DEFAULT_STATE, readState, writeState,
+  PLUGIN_ID, claudeDir, codexHome, dataDir, dataFile, writeFileAtomic, withLock, shareEffort, DEFAULT_STATE, readState, writeState,
   putRoute, routeFor, putSessionSetting, preferFor, reviewFor, guidedFor, markGuided, helperGuidedFor, markHelperGuided, addCodexOutcome,
   PROJECT_CONFIG, readProjectConfig, projectDir, COLD_GUARD_TOKENS, addCost,
   MODEL_FAMILIES, GENERAL_TYPES, TIER_INFO,

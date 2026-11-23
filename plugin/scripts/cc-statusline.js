@@ -116,13 +116,17 @@ function resetSuffix(epochSec, withDay) {
 const PROMPT_CACHE_KEEP_MS = 2 * 24 * 60 * 60 * 1000;
 
 function sharePromptCache(session, pc) {
+  const st = require('./jev-state');
   let file;
+  try { file = st.dataFile('prompt-cache.json'); } catch (_) { return; }
+  try { st.withLock(st.dataFile('prompt-cache.lock'), 200, () => updateSharedPromptCache(file, session, pc)); } catch (_) {}
+}
+
+function updateSharedPromptCache(file, session, pc) {
   let all = {};
   try {
-    file = require('./jev-state').dataFile('prompt-cache.json');
     all = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (_) {
-    if (!file) return;
   }
   const prev = all[session] || {};
   const next = {

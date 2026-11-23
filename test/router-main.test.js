@@ -7,6 +7,28 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+test('prompt run stays within its budget after slow optional work', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-budget-'));
+  try {
+    const data = path.join(dir, 'mynameisjev');
+    fs.mkdirSync(data);
+    fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ enabled: true, sync: true }));
+    const stub = path.join(dir, 'slow.js');
+    fs.writeFileSync(stub, `
+const sync = require(${JSON.stringify(path.join(__dirname, '../plugin/scripts/jev-sync.js'))});
+sync.syncAgents = () => { const end = Date.now() + 1800; while (Date.now() < end) {} return 'unchanged'; };
+global.fetch = (_, opts) => new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+`);
+    const start = Date.now();
+    execFileSync(process.execPath, ['--require', stub, script], {
+      input: JSON.stringify({ prompt: 'Please analyze this complicated request carefully.', session_id: 'budget' }),
+      env: { ...process.env, CLAUDE_CONFIG_DIR: dir, OPENROUTER_API_KEY: 'test', CODEX_HOME: dir },
+      timeout: 6000,
+    });
+    assert.ok(Date.now() - start < 4500, 'hook exceeded 4.5 s budget');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 const script = path.join(__dirname, '..', 'plugin', 'scripts', 'jev-router.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-main-'));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

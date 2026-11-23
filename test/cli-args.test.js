@@ -14,6 +14,26 @@ const cli = require.resolve('../plugin/scripts/jev-cli');
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
+test('CLI reports a locked settings file', async (t) => {
+  const lock = st.dataFile('state.lock');
+  fs.writeFileSync(lock, 'other process');
+  const fresh = new Date(Date.now() + 60000);
+  fs.utimesSync(lock, fresh, fresh);
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  const argv = process.argv;
+  try {
+    process.argv = [process.execPath, cli, 'on'];
+    delete require.cache[cli];
+    require(cli);
+    await new Promise(setImmediate);
+    assert.match(lines.join('\n'), /Error: could not save settings: state file is locked by another process; try again/);
+  } finally {
+    process.argv = argv;
+    fs.unlinkSync(lock);
+  }
+});
+
 test('CLI rejects stray arguments and reuses no handoff path', async (t) => {
   const lines = [];
   t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
