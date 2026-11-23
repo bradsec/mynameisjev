@@ -29,6 +29,8 @@ jobs:
 
       - name: Check vendor and tooling releases
         id: drift
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/drift-check.js --out drift.md
 
       - name: Open or update drift issue

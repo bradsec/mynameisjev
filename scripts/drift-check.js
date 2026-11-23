@@ -88,7 +88,10 @@ function renderReport({ newModels, jevMissing, jevModel, missingPinned, claudeCh
 }
 
 async function get(url) {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  // Unauthenticated GitHub API calls from shared runner IPs hit the rate limit.
+  const auth = process.env.GITHUB_TOKEN && new URL(url).hostname === 'api.github.com'
+    ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+  const response = await fetch(url, { headers: { ...headers, ...auth }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
   return response;
 }
