@@ -40,6 +40,19 @@ test('keeps names but drops values of secret-looking assignments', () => {
   assert.strictEqual(redact('token=xyz; next'), `token=${MARK}; next`);
 });
 
+test('keeps closing quote and parenthesis after URL token value', () => {
+  assert.strictEqual(redact("fetch('https://x.com/a?id=1&token=abc');"), `fetch('https://x.com/a?id=1&token=${MARK}');`);
+});
+
+test('keeps following URL query parameters after API key value', () => {
+  assert.strictEqual(redact('?api_key=abc&page=2'), `?api_key=${MARK}&page=2`);
+});
+
+test('redacts hashes within unquoted assignment values', () => {
+  assert.strictEqual(redact('password=abc#123'), `password=${MARK}`);
+  assert.strictEqual(redact('password=abc#123&next=2'), `password=${MARK}&next=2`);
+});
+
 test('redacts bearer tokens and URL credentials', () => {
   assert.strictEqual(redact(`Authorization: Bearer ${fake('', 30, 'b')}`), `Authorization: Bearer ${MARK}`);
   assert.strictEqual(redact('Authorization: Basic dXNlcjpwYXNz'), `Authorization: Basic ${MARK}`);
@@ -69,6 +82,61 @@ test('sanitize replaces fenced code with line count and language', () => {
   assert.strictEqual(sanitize('Fix this:\n```js\nconst secret = 1;\nrun();\n```\nThanks.'),
     'Fix this:\n[code block: 2 lines, js]\nThanks.');
   assert.strictEqual(sanitize('~~~\none line\n~~~'), '[code block: 1 lines]');
+});
+
+test('sanitize omits private fence info but keeps a valid language', () => {
+  assert.strictEqual(sanitize('```my private note\nbody\n```'), '[code block: 1 lines, my]');
+  assert.strictEqual(sanitize('```js\nbody\n```'), '[code block: 1 lines, js]');
+  assert.strictEqual(sanitize('```<private>\nbody\n```'), '[code block: 1 lines]');
+});
+
+test('redact completes on long non-matching candidates', () => {
+  for (const input of ['1-'.repeat(100000), 'a.'.repeat(100000) + '@', 'password'.repeat(25000)]) {
+    const start = Date.now();
+    redact(input);
+    assert.ok(Date.now() - start < 500, 'redact exceeded 500 ms');
+  }
+});
+
+test('sanitize completes on long non-matching candidates', () => {
+  for (const input of ['1-'.repeat(100000), 'a.'.repeat(100000) + '@', 'password'.repeat(25000)]) {
+    const start = Date.now();
+    sanitize(input);
+    assert.ok(Date.now() - start < 500, 'sanitize exceeded 500 ms');
+  }
+});
+
+test('sanitize consumes fences indented up to three spaces', () => {
+  const out = sanitize('Before\n   ```js\nconst privateValue = 42;\n   ```\nAfter');
+  assert.strictEqual(out, 'Before\n[code block: 1 lines, js]\nAfter');
+  assert.ok(!out.includes('privateValue'));
+});
+
+test('sanitize accepts a longer closing fence of the same character', () => {
+  const out = sanitize('```js\nconst privateValue = 42;\n````\nAfter');
+  assert.strictEqual(out, '[code block: 1 lines, js]\nAfter');
+  assert.ok(!out.includes('privateValue'));
+});
+
+test('sanitize consumes an unclosed fence through end of input', () => {
+  const out = sanitize('Before\n~~~js\nconst privateValue = 42;\nAfter');
+  assert.strictEqual(out, 'Before\n[code block: 2 lines, js]');
+  assert.ok(!out.includes('privateValue'));
+});
+
+test('sanitize keeps only basenames after assignments, quotes, and file URLs', () => {
+  const cases = [
+    ['path=/home/alice/private/file.txt', 'path=file.txt'],
+    ['path: /home/alice/private/file.txt', 'path: file.txt'],
+    ['"/home/alice/private/file.txt"', '"file.txt"'],
+    ["'/home/alice/private/file.txt'", "'file.txt'"],
+    ['`/home/alice/private/file.txt`', '`file.txt`'],
+    ['file:///home/alice/private/file.txt', 'file.txt'],
+    ['path=C:\\Users\\alice\\x.txt', 'path=x.txt'],
+    ['https://example.com/private/file.txt', '[url: example.com]'],
+    ['/mynameisjev:status', 'mynameisjev:status'],
+  ];
+  for (const [input, expected] of cases) assert.strictEqual(sanitize(input), expected, input);
 });
 
 test('sanitize collapses long pasted runs after three lines', () => {

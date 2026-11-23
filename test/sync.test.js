@@ -102,6 +102,30 @@ test('sync writes once, keeps a backup of the replaced file', () => {
   assert.strictEqual(sync.agentsStatus({ style: null }), 'in-sync');
 });
 
+test('sync preserves the old backup when backup replacement fails', (t) => {
+  fs.writeFileSync(sync.agentsPath, 'hand written\n');
+  fs.writeFileSync(sync.backupPath, 'older backup\n');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (to === sync.backupPath) throw Object.assign(new Error('rename failed'), { code: 'EIO' });
+    return rename(from, to);
+  });
+  assert.throws(() => sync.syncAgents({ style: null }), /rename failed/);
+  assert.strictEqual(fs.readFileSync(sync.backupPath, 'utf8'), 'older backup\n');
+  assert.strictEqual(fs.readFileSync(sync.agentsPath, 'utf8'), 'hand written\n');
+});
+
+test('sync preserves the old instructions when replacement fails', (t) => {
+  fs.writeFileSync(sync.agentsPath, 'hand written\n');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (to === sync.agentsPath) throw Object.assign(new Error('rename failed'), { code: 'EIO' });
+    return rename(from, to);
+  });
+  assert.throws(() => sync.syncAgents({ style: null }), /rename failed/);
+  assert.strictEqual(fs.readFileSync(sync.agentsPath, 'utf8'), 'hand written\n');
+});
+
 test('ensureAll reports discovered plugins and style without installing plugins', async (t) => {
   const plugins = require('../plugin/scripts/jev-plugins');
   const exec = require('../plugin/scripts/jev-exec');

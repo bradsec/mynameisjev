@@ -27,7 +27,7 @@
 // silent on any error (missing key, network failure, bad response, timeout).
 // Silent outcomes are recorded in state.lastSilent so `/mynameisjev:status` can tell
 // an error apart from a low-confidence result. Reasons never include prompt
-// text; the only prompt text stored is state.lastPrompt (see PREVIOUS_CHARS).
+// text; the only prompt text stored is sanitized state.lastPrompt (up to 1,000 characters).
 // Likely secrets are stripped (jev-redact.js) from everything sent or stored.
 
 const fs = require('fs');
@@ -78,9 +78,6 @@ const CODEX_CACHE_USABLE_MS = 15 * 60 * 1000;
 const TIMEOUT_MS = 3000;
 // A shift notice interrupts the user, so only fire when Jev is confident.
 const SHIFT_THRESHOLD = 0.8;
-// The previous prompt is kept in the local state file (and sent to Jev with
-// the next prompt), so store only enough to judge topic.
-const PREVIOUS_CHARS = 1000;
 // Yes/no answers at or above this count as yes for the delegation checks.
 const NOUL_THRESHOLD = 0.5;
 // Enough transcript tail to hold the last assistant entry; entries carrying
@@ -719,8 +716,8 @@ const SHIFT_QUESTION = {
 // Below this confidence a size or model answer is not acted on.
 const CONFIDENT = 0.6;
 
-async function classify(prompt, previous, apiKey, privacy) {
-  const state = { message: privacy === 'standard' ? redact(prompt).slice(0, 4000) : sanitize(prompt) };
+async function classify(prompt, previous, apiKey) {
+  const state = { message: sanitize(prompt) };
   const questions = {
     size: {
       type: 'choice',
@@ -1040,14 +1037,13 @@ function main() {
       // fresh context, so a topic change there needs no /clear. Updated before
       // the request so a failed call still leaves the right baseline.
       const last = state.lastPrompt;
-      const privacy = (project && project.privacy) || state.privacy || 'strict';
       const previous = sessionId && last && last.session === sessionId
-        ? (privacy === 'standard' ? last.text : sanitize(last.text)) : null;
-      state.lastPrompt = sessionId ? { session: sessionId, text: privacy === 'standard' ? redact(prompt).slice(0, PREVIOUS_CHARS) : sanitize(prompt) } : null;
+        ? sanitize(last.text) : null;
+      state.lastPrompt = sessionId ? { session: sessionId, text: sanitize(prompt) } : null;
 
       let result;
       try {
-        result = await classify(prompt, previous, apiKey, privacy);
+        result = await classify(prompt, previous, apiKey);
       } catch (e) {
         const timedOut = e.name === 'AbortError';
         // Short form for the status line's JEV segment.

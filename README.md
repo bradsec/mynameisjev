@@ -14,8 +14,9 @@ structured decision model on OpenRouter, a few typed questions about your
 message (how big is the job, does it need the earlier conversation, will it
 produce bulky output, is it coding, is it a new topic) and turns the answers
 into a short routing note for Claude. One Jev call costs about $0.00002.
-By default Jev gets a cut-down copy of your message, with code, long pastes,
-emails, URLs and paths replaced by placeholders (see [Privacy](#privacy)).
+Jev gets up to 1,000 characters of your instruction text, with code blocks,
+long pasted runs, emails, URLs, IP addresses, phone numbers and full paths
+replaced (see [Privacy](#privacy)).
 
 - **Model-aware delegation.** Knows which Claude model the session runs and
   only suggests a helper (`mynameisjev:tiny` on Haiku at low effort,
@@ -246,7 +247,6 @@ lists this session's jobs on demand.
 | --- | --- |
 | `/mynameisjev:on` / `off` | Turn the router on or off |
 | `/mynameisjev:status` | Stats, and the state of each feature |
-| `/mynameisjev:privacy [strict \| standard]` | Show or set router privacy; strict is the default |
 | `/mynameisjev:decide [A \| B -- criteria]` | Jev picks between options; see [Decide](#decide) |
 | `/mynameisjev:compare [a.js b.js -- criteria]` | Jev scores code variants; see [Compare](#compare) |
 | `/mynameisjev:handoff [focus]` | Claude writes a note of the current task, to `/clear` now and pick it up later |
@@ -448,9 +448,9 @@ that model to do the work. Jev is asked to count only a request in your own
 words: not a name inside quoted or pasted text, not "don't use Fable", and
 not another thing with the same name (a story, the Fable compiler, Astra DB).
 That reading is a model's judgement and can be wrong; a prefix is exact. Jev
-reads only the text that [Privacy](#privacy) mode sends: 1,000 characters in
-strict mode (the default), 4,000 in standard. A short message that names
-Fable or Astra is still sent to Jev; slash commands never are.
+reads at most 1,000 characters of a message (see [Privacy](#privacy)). A short
+message that names Fable or Astra is still sent to Jev; slash commands never
+are.
 
 Models missing from your Codex account's list fall back to Codex's default,
 and so does an effort the chosen model does not support.
@@ -581,8 +581,7 @@ your `~/.claude/CLAUDE.md`:
 
 ## Per-project settings
 
-A `.claude/mynameisjev.json` file in a project overrides the global settings
-there:
+A `.claude/mynameisjev.json` file in a project sets project options:
 
 ```json
 { "router": false, "prefer": "codex" }
@@ -592,7 +591,6 @@ there:
 | --- | --- |
 | `router` | `false` stops sizing in this project: no message text is sent. Limit notices and `+` overrides still work |
 | `prefer` | `"codex"` or `"claude"`, overriding the `/mynameisjev:prefer --default` setting in this project. A session's own `/mynameisjev:prefer` still wins |
-| `privacy` | `"strict"` or `"standard"`, overriding the global `/mynameisjev:privacy` setting in this project |
 
 If the file can't be read or has an invalid value, Jev tells you once per
 session and does not size messages in that project until it is fixed. The
@@ -691,17 +689,14 @@ The generated `AGENTS.md`:
 
 ## Privacy
 
-- Router privacy defaults to `strict`. Jev receives up to 1,000 characters
-  of your instruction text. Code blocks, runs of eight or more non-empty
-  lines beyond their first three, emails, URLs,
-  IP addresses, phone numbers and full paths are replaced with placeholders
-  or basenames. The previous message used for topic-shift detection goes
-  through the same mode and is stored locally in that form.
-- `/mynameisjev:privacy standard` restores the previous router behavior:
-  likely-secret redaction, up to 4,000 characters of the current message and
-  1,000 characters of the previous message. Set `"privacy": "strict"` or
-  `"privacy": "standard"` in a project's `.claude/mynameisjev.json` to
-  override the global mode there. `/mynameisjev:off` stops router sends
+- Jev receives up to 1,000 characters of your instruction text. Code blocks,
+  runs of eight or more non-empty lines beyond their first three, emails,
+  URLs, IP addresses, phone numbers and full paths are replaced with
+  placeholders or basenames; a code block's placeholder keeps its line count
+  and a one-word language label such as `js`. The previous message used for
+  topic-shift detection is sanitized the same way and stored locally in that
+  form. This cannot be
+  turned off while sizing is on. `/mynameisjev:off` stops router sends
   everywhere; `"router": false` stops them in one project.
 - Check, decide, compare and tiebreak still send content as before, with
   likely-secret redaction but without strict router sanitization.

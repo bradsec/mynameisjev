@@ -197,8 +197,8 @@ function syncAgents(opts) {
   if (expected === null) return 'skipped: no CLAUDE.md';
   const current = readText(agentsPath);
   if (current === expected) return 'unchanged';
-  if (current !== null) fs.writeFileSync(backupPath, current);
-  fs.writeFileSync(agentsPath, expected);
+  if (current !== null) st.writeFileAtomic(backupPath, current);
+  st.writeFileAtomic(agentsPath, expected);
   return 'updated';
 }
 
