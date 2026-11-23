@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.37
+
+- **Breaking:** Node.js 22 or later is required. Node 18 and 20 are past
+  end of life. CI now tests Node 22 and 24.
+- The state file is never written without its lock. A hook that cannot get
+  the lock within 500 ms skips its write; settings commands wait up to 5 s
+  and report "could not save settings" if the file stays locked.
+- On Windows, a rename that keeps failing no longer falls back to a direct
+  overwrite: the old file is kept and the write is reported as failed.
+- Session effort and prompt-cache data shared between processes are updated
+  under their own locks.
+- The prompt hook works to a 4 s budget inside its 5 s limit: later network
+  and Codex steps get only the time left, and optional steps are skipped
+  when less than 300 ms remains.
+
 ## 0.3.36
 
 - Strict router privacy is now the only mode. `/mynameisjev:privacy` and
