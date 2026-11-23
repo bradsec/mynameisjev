@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.36
+
+- Strict router privacy is now the only mode. `/mynameisjev:privacy` and
+  the `standard` mode are removed, and a project's `"privacy"` key is
+  ignored, so no setting can send Jev the full message again.
+  `/mynameisjev:off` or `"router": false` still stop sizing.
+- Strict mode also masks code blocks indented up to three spaces, closed by
+  a longer fence or left unclosed, and paths after `=`, `:` or a quote and
+  in `file://` URLs. A code block keeps only a one-word language label, not
+  the rest of its opening line.
+- Secret redaction keeps the text after a secret in a URL (`');`, `&page=2`)
+  and no longer cuts a value at `#`, so `password=abc#123` is fully removed.
+- Redaction and sanitizing run in linear time: a long crafted message could
+  take over 40 seconds and stall the prompt hook.
+- The generated `~/.codex/AGENTS.md` and its backup are written atomically.
+
 ## 0.3.35
 
 - Strict router privacy, on by default. Jev receives up to 1,000
