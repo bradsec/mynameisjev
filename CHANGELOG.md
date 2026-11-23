@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.34
+
+- Fix Codex routing: tiny jobs ran on Codex's new default model,
+  `gpt-6.2-sol`, because its description says "Fast". Tiny now skips the
+  default model and picks `gpt-6-luna` again. Specialised models such as
+  `gpt-6.1-terra` ("Efficient model...") no longer count as fast.
+- The built-in Codex models used when Codex has no model list are now
+  `gpt-6.2-sol` (everyday) and `gpt-6.2-astra` (large, hardest, and the
+  quota-heavy list).
+- A weekly drift check (maintainers only) opens a GitHub issue when new
+  Claude, GPT or Gemini models, Claude Code or Codex releases, or a missing
+  pinned Jev or Codex model mean the plugin may need an update.
+
 ## 0.3.33
 
 - The first Claude helper note in a session, and the first after a
