@@ -335,7 +335,7 @@ function jevSegment(state, projectDir, session) {
 }
 
 // Where Jev sent the latest message: " → opus" (grey, the session's own
-// model), " → codex gpt-6.1-sol?" (amber, suggested) or " → sonnet ✓" (green,
+// model), " → codex gpt-6.2-sol?" (amber, suggested) or " → sonnet ✓" (green,
 // the hand-off ran). Hidden once older than 30 minutes.
 function routeSuffix(route) {
   if (!route || Date.now() - Date.parse(route.at) > 30 * 60 * 1000) return '';

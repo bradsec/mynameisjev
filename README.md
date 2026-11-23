@@ -178,8 +178,8 @@ minutes):
 | Shows | Meaning |
 | --- | --- |
 | `→ opus` (grey) | Handled on the session's own Claude model |
-| `→ sonnet?`, `→ codex gpt-6.1-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
-| `→ sonnet ✓`, `→ codex gpt-6.1-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
+| `→ sonnet?`, `→ codex gpt-6.2-sol?` (amber) | Jev suggested handing it to that Claude helper or Codex model |
+| `→ sonnet ✓`, `→ codex gpt-6.2-sol ✓` (green) | The hand-off ran: a `mynameisjev:*` subagent started, or a Codex task ran |
 | `codex-first` (cyan, before the arrow) | Prefer-Codex mode is on in this session |
 | `review off` (gray) | Claude's review of Codex work is off in this session |
 | `off in project`, `project config error` | See [Per-project settings](#per-project-settings) |
@@ -410,8 +410,9 @@ through its `codex:codex-rescue` agent, which itself runs on Claude.
 
 Jev picks the Codex model for each size from Codex's own model list, which
 it refreshes every 5 minutes, so new Codex models need no Jev update. It reads
-each model's description: tiny gets the newest fast model, everyday the model
-Codex marks as default, large and hardest the newest frontier model. Models
+each model's description: tiny gets the newest fast model except Codex's
+default, everyday the model Codex marks as default, large and hardest the
+newest frontier model. Models
 described as older or previous generation are skipped. A size no description
 fits keeps the model below, moved to its replacement when Codex lists one.
 Jev tells you once when a size moves to another model. Models you set with
@@ -423,11 +424,11 @@ With Codex's list as of November 2026 the picks are:
 | Size | Codex model | With `+codex:<size>` | Effort |
 | --- | --- | --- | --- |
 | tiny | `gpt-6-luna` | `gpt-6-luna` | low |
-| everyday | `gpt-6.1-sol` | `gpt-6.1-sol` | medium |
-| large | `gpt-6.1-sol` | `gpt-6-astra` | medium |
-| hardest | `gpt-6.1-sol` | `gpt-6-astra` | high |
+| everyday | `gpt-6.2-sol` | `gpt-6.2-sol` | medium |
+| large | `gpt-6.2-sol` | `gpt-6.2-astra` | medium |
+| hardest | `gpt-6.2-sol` | `gpt-6.2-astra` | high |
 
-Frontier models such as `gpt-6-astra` use Codex quota fastest. Jev selects
+Frontier models such as `gpt-6.2-astra` use Codex quota fastest. Jev selects
 them only when you ask with `+astra`, `+codex:astra`, `+codex:large`,
 `+codex:hardest`, a plain-language request such as "have Astra do it", or a
 tier set to one with `/mynameisjev:codex set`. `+astra` uses the current

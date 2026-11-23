@@ -74,7 +74,7 @@ test('route: with Codex, self-contained coding goes to Codex', () => {
   const r = router.routeAdvice('everyday', result({ coding: 0.9 }), ctx({ codexNow: codexOk }));
   assert.strictEqual(r.codex, true);
   assert.match(r.note, /Route it to Codex/);
-  assert.match(r.note, /jev-codex-run\.js" --model gpt-6.1-sol --effort medium/);
+  assert.match(r.note, /jev-codex-run\.js" --model gpt-6.2-sol --effort medium/);
 });
 
 test('route: busy Codex falls back to Claude', () => {
@@ -344,8 +344,8 @@ test('explicit Fable uses a general-purpose Agent or the Fable session', () => {
 test('explicit Astra uses the frontier tier even with a saved hardest override', () => {
   for (const prefix of ['+astra', '+codex:astra']) {
     const r = router.overrideAdvice(router.parseOverride(`${prefix} fix it`), ctx({ codexNow: codexOk, overrides: { hardest: { model: 'gpt-6.1-sol' } } }));
-    assert.match(r.note, /jev-codex-run\.js" --model gpt-6-astra --effort high/);
-    assert.deepStrictEqual(r.route, ['codex', 'gpt-6-astra', 'suggested']);
+    assert.match(r.note, /jev-codex-run\.js" --model gpt-6.2-astra --effort high/);
+    assert.deepStrictEqual(r.route, ['codex', 'gpt-6.2-astra', 'suggested']);
   }
   assert.match(router.overrideAdvice(router.parseOverride('+astra fix it'), ctx()).notice, /Codex is not available/);
 });

@@ -36,21 +36,21 @@ const LOCK_MAX_AGE_MS = 30 * 1000;
 // new Codex model needs no Jev release.
 const DEFAULT_TIERS = {
   tiny: { model: 'gpt-6-luna', effort: 'low' },
-  everyday: { model: 'gpt-6.1-sol', effort: 'medium' },
-  large: { model: 'gpt-6-astra', effort: 'medium' },
-  hardest: { model: 'gpt-6-astra', effort: 'high' },
+  everyday: { model: 'gpt-6.2-sol', effort: 'medium' },
+  large: { model: 'gpt-6.2-astra', effort: 'medium' },
+  hardest: { model: 'gpt-6.2-astra', effort: 'high' },
 };
 const TASK_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 // Models that draw down Codex usage fastest. Jev routes to them only when the
 // user asks: a +codex prefix, or a tier set with /mynameisjev:codex set.
 // Seed only: with a model list, the frontier models found there count.
-const PREMIUM_MODELS = new Set(['gpt-6-astra']);
+const PREMIUM_MODELS = new Set(['gpt-6.2-astra']);
 
 // How autoTiers reads Codex's model descriptions ("Fast and affordable model
 // for easier tasks.", "Frontier intelligence for the most demanding work.").
 // Codex lists the newest models first, so the first match is the newest.
 const OLD_MODEL = /\b(older|previous|legacy|deprecated)\b/i;
-const FAST_MODEL = /\b(fast|affordable|cheap|efficient|lightweight)\b/i;
+const FAST_MODEL = /\b(fast|affordable|cheap|lightweight)\b/i;
 const FRONTIER_MODEL = /\b(frontier|most capable|most intelligent|most demanding|flagship)\b/i;
 const MAX_UPGRADE_HOPS = 5;
 
@@ -241,8 +241,9 @@ function upgraded(id, models) {
 }
 
 // Each tier's model and effort for Codex's current model list, before user
-// overrides: tiny takes the newest fast model, everyday Codex's default,
-// large and hardest the newest frontier model. A tier no description fits
+// overrides: tiny takes the newest fast model excluding Codex's default,
+// everyday takes the default, and large and hardest the newest frontier
+// model. A tier no description fits
 // keeps its seed model, following any upgrade Codex lists for it. With no
 // list this is DEFAULT_TIERS.
 function autoTiers(cache) {
@@ -250,7 +251,7 @@ function autoTiers(cache) {
   const def = models.find((m) => m.isDefault);
   const frontier = newest(models, FRONTIER_MODEL);
   const found = {
-    tiny: newest(models, FAST_MODEL),
+    tiny: newest(models.filter((m) => !m.isDefault), FAST_MODEL),
     everyday: def ? def.id : null,
     large: frontier,
     hardest: frontier,

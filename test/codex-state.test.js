@@ -76,20 +76,20 @@ test('Codex is unavailable without the codex plugin', () => {
 });
 
 test('tier choice: defaults, overrides, unknown models dropped', () => {
-  const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6-luna' }] };
+  const cache = { models: [{ id: 'gpt-6.2-astra' }, { id: 'gpt-6-luna' }] };
   assert.deepStrictEqual(codex.tierChoice('tiny', {}, cache), { model: 'gpt-6-luna', effort: 'low' });
-  assert.deepStrictEqual(codex.tierChoice('large', { large: { effort: 'high' } }, cache, true), { model: 'gpt-6-astra', effort: 'high' });
-  assert.strictEqual(codex.tierChoice('everyday', {}, cache).model, null, 'gpt-6.1-sol is not in this list');
-  assert.strictEqual(codex.DEFAULT_TIERS.everyday.model, 'gpt-6.1-sol');
+  assert.deepStrictEqual(codex.tierChoice('large', { large: { effort: 'high' } }, cache, true), { model: 'gpt-6.2-astra', effort: 'high' });
+  assert.strictEqual(codex.tierChoice('everyday', {}, cache).model, null, 'gpt-6.2-sol is not in this list');
+  assert.strictEqual(codex.DEFAULT_TIERS.everyday.model, 'gpt-6.2-sol');
   assert.strictEqual(codex.tierChoice('tiny', { tiny: { effort: 'max' } }, cache).effort, null, 'task effort must be none..xhigh');
 });
 
-test('tier choice: unasked routing stays off gpt-6-astra unless the user picked it', () => {
-  const cache = { models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6.1-sol' }] };
-  assert.deepStrictEqual(codex.tierChoice('large', {}, cache), { model: 'gpt-6.1-sol', effort: 'medium' });
-  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache), { model: 'gpt-6.1-sol', effort: 'high' });
-  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache, true), { model: 'gpt-6-astra', effort: 'high' });
-  assert.strictEqual(codex.tierChoice('large', { large: { model: 'gpt-6-astra' } }, cache).model, 'gpt-6-astra', 'set with /mynameisjev:codex set');
+test('tier choice: unasked routing stays off gpt-6.2-astra unless the user picked it', () => {
+  const cache = { models: [{ id: 'gpt-6.2-astra' }, { id: 'gpt-6.2-sol' }] };
+  assert.deepStrictEqual(codex.tierChoice('large', {}, cache), { model: 'gpt-6.2-sol', effort: 'medium' });
+  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache), { model: 'gpt-6.2-sol', effort: 'high' });
+  assert.deepStrictEqual(codex.tierChoice('hardest', {}, cache, true), { model: 'gpt-6.2-astra', effort: 'high' });
+  assert.strictEqual(codex.tierChoice('large', { large: { model: 'gpt-6.2-astra' } }, cache).model, 'gpt-6.2-astra', 'set with /mynameisjev:codex set');
   assert.strictEqual(codex.tierChoice('large', { everyday: { model: 'gpt-6-luna' } }, cache).model, null, 'falls back to the everyday choice, here unlisted');
 });
 
@@ -103,9 +103,28 @@ const LIVE = [
   { id: 'gpt-5.6-luna', description: 'Older fast and efficient model.' },
 ];
 
-test('auto tiers: today\'s Codex list gives the built-in table', () => {
+test('auto tiers: historical Codex list follows its descriptions', () => {
   const tiers = codex.autoTiers({ models: LIVE });
-  for (const t of Object.keys(codex.DEFAULT_TIERS)) assert.deepStrictEqual(tiers[t], codex.DEFAULT_TIERS[t], t);
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(tiers).map(([tier, choice]) => [tier, choice.model])), {
+    tiny: 'gpt-6-luna', everyday: 'gpt-6.1-sol', large: 'gpt-6-astra', hardest: 'gpt-6-astra',
+  });
+});
+
+test('auto tiers: current Codex list keeps tiny off the default and specialised models', () => {
+  const models = [
+    { id: 'gpt-6.2-sol', description: 'Fast, go-to model for coding and everyday work.', isDefault: true },
+    { id: 'gpt-6.2-astra', description: 'Our most capable model for complex coding and professional work.' },
+    { id: 'gpt-6.1-terra', description: 'Efficient model that excels at visual understanding and computer use.' },
+    { id: 'gpt-6.1-sol', description: 'Previous generation model for coding and everyday work.' },
+    { id: 'gpt-6-astra', description: 'Previous generation model for complex coding and professional work.' },
+    { id: 'gpt-6-sol', description: 'Legacy model for coding and everyday work.' },
+    { id: 'gpt-6-luna', description: 'Fast and affordable model for easier tasks.' },
+  ];
+  const tiers = codex.autoTiers({ models });
+  assert.strictEqual(tiers.tiny.model, 'gpt-6-luna');
+  assert.strictEqual(tiers.everyday.model, 'gpt-6.2-sol');
+  assert.strictEqual(tiers.large.model, 'gpt-6.2-astra');
+  assert.strictEqual(tiers.hardest.model, 'gpt-6.2-astra');
 });
 
 test('auto tiers: a new generation is picked up from the descriptions, older ones skipped', () => {
