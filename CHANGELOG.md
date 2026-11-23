@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.35
+
+- Strict router privacy, on by default. Jev receives up to 1,000
+  characters of your instruction text, with code blocks, long pasted runs
+  (after their first three lines), emails, URLs, IP addresses, phone numbers
+  and full paths replaced by placeholders or file names. The previous message
+  used for topic-shift detection is sanitized the same way, and stored in
+  that form.
+- `/mynameisjev:privacy [strict | standard]` shows or sets the mode;
+  `standard` restores the earlier behaviour (secret redaction, 4,000
+  characters). A project can override it with `"privacy"` in
+  `.claude/mynameisjev.json`. `/mynameisjev:status` shows the mode.
+- Check, decide, compare and tiebreak send content as before.
+
 ## 0.3.34
 
 - Fix Codex routing: tiny jobs ran on Codex's new default model,
