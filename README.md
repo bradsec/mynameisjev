@@ -751,6 +751,12 @@ To release:
 The release workflow checks the tag matches `plugin.json`, runs the tests, and
 publishes a GitHub release with that version's changelog section as notes.
 
+The weekly drift check reviews new Claude, GPT and Gemini models on OpenRouter, pinned Jev and Codex
+models, and Claude Code and Codex releases. It opens or updates one `drift`
+issue when these need review. After acting on the issue, run
+`node scripts/drift-check.js --update-baseline`, commit
+`scripts/drift-baseline.json`, and close the issue.
+
 ## License
 
 [MIT](LICENSE)
